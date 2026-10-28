@@ -1,0 +1,107 @@
+# Build da imagem Docker e push no ECR (fcg/catalog-api).
+#
+# - pull_request: só builda, sem tocar na AWS (PRs de fork não recebem token OIDC).
+# - push na main: publica sha-<commit> (expira em 15 dias pela lifecycle policy do ECR).
+# - push de tag v*: publica a tag de release (nunca expira; use esta em produção).
+#
+# Credenciais: OIDC com a role fcg-gha-catalog-api, cujo ARN vem da variável de
+# repositório AWS_ROLE_ARN. Nenhuma access key fica guardada no GitHub. A role e a
+# trust policy vivem no IaC do FIAPCloudGames-fase4-Orchestration
+# (infra/cloudformation/github-oidc.yaml).
+name: ecr-push
+
+on:
+  push:
+    branches: [main]
+    tags: ['v*']
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ecr-push-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+env:
+  AWS_REGION: us-east-1
+  ECR_REPOSITORY: fcg/catalog-api
+  DOCKERFILE: src/CatalogAPI.API/Dockerfile
+
+jobs:
+  build:
+    name: Build (PR)
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Build da imagem
+        run: docker build -f "$DOCKERFILE" -t "$ECR_REPOSITORY:pr-${{ github.event.number }}" .
+
+  push:
+    name: Build e push no ECR
+    if: github.event_name == 'push'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write # necessário para o OIDC
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Definir a tag da imagem
+        id: tag
+        run: |
+          if [ "$GITHUB_REF_TYPE" = "tag" ]; then
+            echo "value=$GITHUB_REF_NAME" >> "$GITHUB_OUTPUT"
+          else
+            echo "value=sha-${GITHUB_SHA::7}" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Conferir a variável AWS_ROLE_ARN
+        env:
+          AWS_ROLE_ARN: ${{ vars.AWS_ROLE_ARN }}
+        run: |
+          if [ -z "$AWS_ROLE_ARN" ]; then
+            echo "::error::Variável de repositório AWS_ROLE_ARN não configurada (Settings > Secrets and variables > Actions > Variables)."
+            exit 1
+          fi
+
+      - uses: aws-actions/configure-aws-credentials@e1253824e5c10ff9df46874f81ed3ec929e19cfd # v6.3.0
+        with:
+          role-to-assume: ${{ vars.AWS_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - id: ecr
+        uses: aws-actions/amazon-ecr-login@03f1aad4c6c7ffd436567f42f9384779290529bd # v2.1.7
+
+      # As tags do ECR são IMMUTABLE: um re-run do mesmo commit falharia no push.
+      # Se a tag já existe, a imagem publicada é a deste commit e não há o que fazer.
+      - name: Conferir se a tag já existe no ECR
+        id: exists
+        env:
+          TAG: ${{ steps.tag.outputs.value }}
+        run: |
+          if out=$(aws ecr describe-images --repository-name "$ECR_REPOSITORY" --image-ids imageTag="$TAG" 2>&1); then
+            echo "::notice::$ECR_REPOSITORY:$TAG já existe no ECR; push ignorado."
+            echo "value=true" >> "$GITHUB_OUTPUT"
+          elif grep -q ImageNotFoundException <<< "$out"; then
+            echo "value=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "$out" >&2
+            exit 1
+          fi
+
+      - name: Build e push
+        if: steps.exists.outputs.value == 'false'
+        env:
+          IMAGE: ${{ steps.ecr.outputs.registry }}/${{ env.ECR_REPOSITORY }}:${{ steps.tag.outputs.value }}
+        run: |
+          docker build -f "$DOCKERFILE" \
+            --label "org.opencontainers.image.source=$GITHUB_SERVER_URL/$GITHUB_REPOSITORY" \
+            --label "org.opencontainers.image.revision=$GITHUB_SHA" \
+            -t "$IMAGE" .
+          docker push "$IMAGE"
+          echo "### Imagem publicada" >> "$GITHUB_STEP_SUMMARY"
+          echo "\`$IMAGE\`" >> "$GITHUB_STEP_SUMMARY"
