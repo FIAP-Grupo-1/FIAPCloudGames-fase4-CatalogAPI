@@ -13,7 +13,9 @@ using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
 using Microsoft.Extensions.Hosting;
+using StackExchange.Redis;
 using Testcontainers.PostgreSql;
+using Testcontainers.Redis;
 
 namespace CatalogAPI.API.Tests.Fixtures;
 
@@ -29,9 +31,13 @@ public class ApiFactory : WebApplicationFactory<Program>, IAsyncLifetime
         .WithPassword("pass")
         .Build();
 
+    // The API keeps the real Redis cache, so tests get their own throwaway instance
+    // instead of depending on one running on the machine.
+    private readonly RedisContainer _redis = new RedisBuilder("redis:7-alpine").Build();
+
     public async Task InitializeAsync()
     {
-        await _container.StartAsync();
+        await Task.WhenAll(_container.StartAsync(), _redis.StartAsync());
 
         using var scope = Services.CreateScope();
         var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
@@ -41,6 +47,7 @@ public class ApiFactory : WebApplicationFactory<Program>, IAsyncLifetime
     public new async Task DisposeAsync()
     {
         await _container.DisposeAsync();
+        await _redis.DisposeAsync();
         await base.DisposeAsync();
     }
 
@@ -63,6 +70,11 @@ public class ApiFactory : WebApplicationFactory<Program>, IAsyncLifetime
 
             services.AddDbContext<AppDbContext>(options =>
                 options.UseNpgsql(_container.GetConnectionString()));
+
+            // Same for the Redis connection used by the cache
+            services.RemoveAll<IConnectionMultiplexer>();
+            services.AddSingleton<IConnectionMultiplexer>(_ =>
+                ConnectionMultiplexer.Connect(_redis.GetConnectionString()));
 
             // Endpoint tests must not depend on a real RabbitMQ broker:
             // drop all hosted services (including the RabbitMQ consumer) and stub the event publisher.
@@ -108,12 +120,16 @@ public class ApiFactory : WebApplicationFactory<Program>, IAsyncLifetime
     private static string Base64Url(byte[] bytes) =>
         Convert.ToBase64String(bytes).TrimEnd('=').Replace('+', '-').Replace('/', '_');
 
+    // Runs before every test: empties the database and the Redis cache, so no test
+    // sees rows or cached responses left by a previous one.
     public async Task ResetDatabaseAsync()
     {
         using var scope = Services.CreateScope();
         var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
         await db.LibraryItems.ExecuteDeleteAsync();
         await db.Games.ExecuteDeleteAsync();
+
+        await _redis.ExecAsync(["redis-cli", "FLUSHALL"]);
     }
 
     public async Task SeedLibraryItemAsync(Guid userId, Guid gameId)
