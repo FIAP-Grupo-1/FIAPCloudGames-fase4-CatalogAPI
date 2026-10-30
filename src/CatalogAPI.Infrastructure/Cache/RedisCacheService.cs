@@ -29,5 +29,24 @@ namespace CatalogAPI.Infrastructure.Cache
 
         public async Task RemoveAsync(string key, CancellationToken cancellationToken = default)
             => await _cache.KeyDeleteAsync(key);
+
+        // Usado para invalidar listagens paginadas, que têm uma chave por página/tamanho.
+        // KeysAsync usa SCAN, que não bloqueia o Redis como o KEYS.
+        public async Task RemoveByPrefixAsync(string prefix, CancellationToken cancellationToken = default)
+        {
+            foreach (var endpoint in connection.GetEndPoints())
+            {
+                var server = connection.GetServer(endpoint);
+                if (server.IsReplica)
+                    continue;
+
+                var keys = new List<RedisKey>();
+                await foreach (var key in server.KeysAsync(pattern: $"{prefix}*").WithCancellation(cancellationToken))
+                    keys.Add(key);
+
+                if (keys.Count > 0)
+                    await _cache.KeyDeleteAsync([.. keys]);
+            }
+        }
     }
 }

@@ -1,11 +1,12 @@
 using CatalogAPI.Application.Contexts.Games.UseCases.Create.DTOs;
+using CatalogAPI.Application.Shared.Cache;
 using CatalogAPI.Domain.Contexts.Games.Commands;
 using CatalogAPI.Domain.Contexts.Games.Entities;
 using MediatR;
 
 namespace CatalogAPI.Application.Contexts.Games.UseCases.Create;
 
-public class Handler(ICreate repository)
+public class Handler(ICreate repository, ICacheService cacheService)
     : IRequestHandler<Request, Response>
 {
     public async Task<Response> Handle(Request request, CancellationToken cancellationToken)
@@ -24,6 +25,9 @@ public class Handler(ICreate repository)
                 request.Genre,
                 request.ReleaseDate),
             cancellationToken);
+
+        // O novo jogo precisa aparecer nas listagens já em cache.
+        await cacheService.RemoveByPrefixAsync("games:all:", cancellationToken);
 
         return new Response(
             "Game created",
