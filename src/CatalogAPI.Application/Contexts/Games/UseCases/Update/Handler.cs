@@ -31,6 +31,10 @@ public class Handler(IUpdate repository, ICacheService cacheService) : IRequestH
 
         await cacheService.RemoveAsync(cacheKey, cancellationToken);
 
+        // Título, preço e gênero também aparecem nas listagens de jogos e nas bibliotecas.
+        await cacheService.RemoveByPrefixAsync("games:all:", cancellationToken);
+        await cacheService.RemoveByPrefixAsync("libraries:all:", cancellationToken);
+
         return new Response();
     }
 }

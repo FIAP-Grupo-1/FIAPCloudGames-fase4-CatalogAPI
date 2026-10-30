@@ -222,12 +222,12 @@ Isso mantém os handlers focados no fluxo de sucesso e garante respostas de erro
 
 ## Testes
 
-O projeto possui 194 testes distribuídos em quatro camadas. Os contextos **Games** e **Libraries** (aquisição de jogos, processamento de pagamento e consulta da biblioteca) estão cobertos.
+O projeto possui 202 testes distribuídos em quatro camadas. Os contextos **Games** e **Libraries** (aquisição de jogos, processamento de pagamento e consulta da biblioteca) estão cobertos.
 
 | Projeto | Tipo | Testes | Ferramentas |
 |---|---|---|---|
 | `CatalogAPI.Domain.Tests` | Unitário | 37 | xUnit |
-| `CatalogAPI.Application.Tests` | Unitário | 74 | xUnit, NSubstitute |
+| `CatalogAPI.Application.Tests` | Unitário | 82 | xUnit, NSubstitute |
 | `CatalogAPI.Infrastructure.Tests` | Integração/Unitário | 40 | xUnit, NSubstitute, Testcontainers (PostgreSQL) |
 | `CatalogAPI.API.Tests` | Integração (E2E) | 43 | xUnit, Testcontainers, WebApplicationFactory |
 

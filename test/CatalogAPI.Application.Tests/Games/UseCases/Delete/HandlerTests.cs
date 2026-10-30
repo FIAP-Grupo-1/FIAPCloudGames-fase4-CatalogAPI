@@ -10,12 +10,41 @@ namespace CatalogAPI.Application.Tests.Games.UseCases.Delete;
 public class HandlerTests
 {
     private readonly IDelete _repository;
+    private readonly ICacheService _cacheService;
     private readonly Handler _handler;
 
     public HandlerTests()
     {
         _repository = Substitute.For<IDelete>();
-        _handler = new Handler(_repository, Substitute.For<ICacheService>());
+        _cacheService = Substitute.For<ICacheService>();
+        _handler = new Handler(_repository, _cacheService);
+    }
+
+    [Fact]
+    public async Task Handle_WithValidId_ShouldInvalidateGameAndListCaches()
+    {
+        var id = Guid.NewGuid();
+
+        _repository.DeleteAsync(id, Arg.Any<CancellationToken>())
+            .Returns(Task.FromResult(true));
+
+        await _handler.Handle(new Request(id), CancellationToken.None);
+
+        await _cacheService.Received(1).RemoveAsync($"games:{id}", Arg.Any<CancellationToken>());
+        await _cacheService.Received(1).RemoveByPrefixAsync("games:all:", Arg.Any<CancellationToken>());
+        await _cacheService.Received(1).RemoveByPrefixAsync("libraries:all:", Arg.Any<CancellationToken>());
+    }
+
+    [Fact]
+    public async Task Handle_WhenGameNotFound_ShouldNotInvalidateCache()
+    {
+        _repository.DeleteAsync(Arg.Any<Guid>(), Arg.Any<CancellationToken>())
+            .Returns(Task.FromResult(false));
+
+        await Assert.ThrowsAsync<GameNotFoundException>(
+            () => _handler.Handle(new Request(Guid.NewGuid()), CancellationToken.None));
+
+        await _cacheService.DidNotReceive().RemoveByPrefixAsync(Arg.Any<string>(), Arg.Any<CancellationToken>());
     }
 
     [Fact]

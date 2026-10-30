@@ -22,6 +22,10 @@ public class Handler(IDelete repository, ICacheService cacheService) : IRequestH
 
         await cacheService.RemoveAsync(cacheKey, cancellationToken);
 
+        // O jogo removido não pode continuar nas listagens de jogos nem nas bibliotecas.
+        await cacheService.RemoveByPrefixAsync("games:all:", cancellationToken);
+        await cacheService.RemoveByPrefixAsync("libraries:all:", cancellationToken);
+
         return new Response();
     }
 }

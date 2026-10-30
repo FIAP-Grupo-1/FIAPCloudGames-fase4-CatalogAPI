@@ -11,17 +11,49 @@ namespace CatalogAPI.Application.Tests.Games.UseCases.Update;
 public class HandlerTests
 {
     private readonly IUpdate _repository;
+    private readonly ICacheService _cacheService;
     private readonly Handler _handler;
     private static readonly DateOnly Tomorrow = DateOnly.FromDateTime(DateTime.UtcNow.AddDays(1));
 
     public HandlerTests()
     {
         _repository = Substitute.For<IUpdate>();
-        _handler = new Handler(_repository, Substitute.For<ICacheService>());
+        _cacheService = Substitute.For<ICacheService>();
+        _handler = new Handler(_repository, _cacheService);
     }
 
     private static Request ValidRequest(Guid? id = null) =>
         new(id ?? Guid.NewGuid(), "Updated Title", "Updated description text here", 59.99m, GameGenre.RPG, GameStatus.Active, Tomorrow);
+
+    [Fact]
+    public async Task Handle_WithValidRequest_ShouldInvalidateGameAndListCaches()
+    {
+        var request = ValidRequest();
+
+        _repository.UpdateAsync(
+                request.Id, request.Title, request.Description, request.Price,
+                request.Genre, request.Status, request.ReleaseDate, Arg.Any<CancellationToken>())
+            .Returns(Task.FromResult(true));
+
+        await _handler.Handle(request, CancellationToken.None);
+
+        await _cacheService.Received(1).RemoveAsync($"games:{request.Id}", Arg.Any<CancellationToken>());
+        await _cacheService.Received(1).RemoveByPrefixAsync("games:all:", Arg.Any<CancellationToken>());
+        await _cacheService.Received(1).RemoveByPrefixAsync("libraries:all:", Arg.Any<CancellationToken>());
+    }
+
+    [Fact]
+    public async Task Handle_WhenGameNotFound_ShouldNotInvalidateCache()
+    {
+        _repository.UpdateAsync(
+                Arg.Any<Guid>(), Arg.Any<string?>(), Arg.Any<string?>(), Arg.Any<decimal?>(),
+                Arg.Any<GameGenre?>(), Arg.Any<GameStatus?>(), Arg.Any<DateOnly?>(), Arg.Any<CancellationToken>())
+            .Returns(Task.FromResult(false));
+
+        await Assert.ThrowsAsync<GameNotFoundException>(() => _handler.Handle(ValidRequest(), CancellationToken.None));
+
+        await _cacheService.DidNotReceive().RemoveByPrefixAsync(Arg.Any<string>(), Arg.Any<CancellationToken>());
+    }
 
     [Fact]
     public async Task Handle_WithValidRequest_ShouldReturnNoContent()

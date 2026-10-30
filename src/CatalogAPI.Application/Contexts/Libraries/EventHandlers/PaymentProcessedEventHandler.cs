@@ -13,6 +13,7 @@ namespace CatalogAPI.Application.Contexts.Libraries.EventHandlers;
 /// </summary>
 public partial class PaymentProcessedEventHandler(
     IGamePurchase repository,
+    ICacheService cacheService,
     ILogger<PaymentProcessedEventHandler> logger) : IEventHandler<PaymentProcessedEvent>
 {
     public async Task HandleAsync(PaymentProcessedEvent paymentProcessed, CancellationToken cancellationToken = default)
@@ -24,6 +25,9 @@ public partial class PaymentProcessedEventHandler(
         }
 
         await repository.ExecuteAsync(paymentProcessed.UserId, paymentProcessed.GameId, cancellationToken);
+
+        // O jogo comprado precisa aparecer na biblioteca já em cache desse usuário.
+        await cacheService.RemoveByPrefixAsync($"libraries:all:userId={paymentProcessed.UserId}:", cancellationToken);
 
         LogGameAddedToLibrary(paymentProcessed.GameId, paymentProcessed.UserId);
     }
