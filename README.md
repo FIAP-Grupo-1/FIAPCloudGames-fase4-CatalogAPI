@@ -222,16 +222,21 @@ Isso mantém os handlers focados no fluxo de sucesso e garante respostas de erro
 
 ## Testes
 
-O projeto possui 188 testes distribuídos em quatro camadas, todos passando. Os contextos **Games** e **Libraries** (aquisição de jogos, processamento de pagamento e consulta da biblioteca) estão cobertos.
+O projeto possui 194 testes distribuídos em quatro camadas. Os contextos **Games** e **Libraries** (aquisição de jogos, processamento de pagamento e consulta da biblioteca) estão cobertos.
 
 | Projeto | Tipo | Testes | Ferramentas |
 |---|---|---|---|
 | `CatalogAPI.Domain.Tests` | Unitário | 37 | xUnit |
 | `CatalogAPI.Application.Tests` | Unitário | 74 | xUnit, NSubstitute |
-| `CatalogAPI.Infrastructure.Tests` | Integração/Unitário | 34 | xUnit, NSubstitute, Testcontainers (PostgreSQL) |
+| `CatalogAPI.Infrastructure.Tests` | Integração/Unitário | 40 | xUnit, NSubstitute, Testcontainers (PostgreSQL) |
 | `CatalogAPI.API.Tests` | Integração (E2E) | 43 | xUnit, Testcontainers, WebApplicationFactory |
 
-Os testes de integração sobem um container PostgreSQL efêmero via **Testcontainers** — é necessário ter o Docker rodando.
+Os testes de integração sobem containers efêmeros via **Testcontainers** — é necessário ter o Docker rodando, mas nenhum PostgreSQL ou Redis local:
+
+- `CatalogAPI.Infrastructure.Tests`: PostgreSQL; cada classe limpa as tabelas que usa antes de cada teste.
+- `CatalogAPI.API.Tests`: PostgreSQL e Redis (o `ApiFactory` mantém o cache real, `RedisCacheService`). Antes de cada teste, o `ResetDatabaseAsync` apaga as tabelas e executa `FLUSHALL` no Redis, então todo teste começa com banco e cache vazios.
+
+> Se o Testcontainers falhar com `unauthorized: incorrect username or password` ao baixar imagens, o login salvo em `~/.docker/config.json` está inválido. Rode `docker logout` (as imagens usadas são públicas) ou faça login novamente.
 
 > Os testes de endpoint não dependem de um broker RabbitMQ: o `ApiFactory` remove os hosted services (incluindo o consumer do `FiapCloudGames.RabbitMq`) e substitui o `IIntegrationEventPublisher` por um stub _no-op_. A lógica de consumo é coberta por testes unitários do `PaymentProcessedEventHandler` (Application) e do `PaymentProcessedMessageProcessor` (mapeamento de falhas para `MessageProcessingResult`, com o `IEventDispatcher` mockado); a persistência em si, pelos testes do repositório `GamePurchase`.
 
@@ -249,6 +254,19 @@ dotnet test test/CatalogAPI.Application.Tests/
 dotnet test test/CatalogAPI.Infrastructure.Tests/
 dotnet test test/CatalogAPI.API.Tests/
 ```
+
+---
+
+## CI
+
+O workflow `.github/workflows/test.yml` roda em todo pull request:
+
+| Job | O que faz |
+|---|---|
+| `test` | Faz restore e build em Release e roda os testes unitários (`Domain`, `Application`) e de integração (`Infrastructure`, `API`). PostgreSQL e Redis dos testes vêm do Testcontainers. |
+| `container-test` | Roda só se o `test` passar (`needs: test`). Faz o build da imagem pelo `src/CatalogAPI.API/Dockerfile`, sobe PostgreSQL, Redis, RabbitMQ e a API numa rede Docker e faz um smoke test em `GET /api/v1/games` (espera HTTP 200). Os logs da API são exibidos sempre. |
+
+O build e o push da imagem no ECR ficam no `ecr-push.yml`.
 
 ---
 

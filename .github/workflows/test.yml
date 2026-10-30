@@ -1,0 +1,92 @@
+name: Testes Automatizados
+
+on: pull_request
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    name: Execução de testes .NET
+    runs-on: ubuntu-latest
+
+    # PostgreSQL e Redis são criados pelos próprios testes via Testcontainers (o runner
+    # já tem Docker). O RabbitMQ não é necessário (o ApiFactory o substitui).
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Configurando .NET
+        uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68 # v6.0.0
+        with:
+          dotnet-version: 10.0.x
+
+      - name: Restaurando dependências
+        run: dotnet restore
+
+      - name: Compilando
+        run: dotnet build --no-restore -c Release
+
+      - name: Executando testes unitários
+        run: |
+          dotnet test test/CatalogAPI.Domain.Tests --no-build -c Release
+          dotnet test test/CatalogAPI.Application.Tests --no-build -c Release
+
+      - name: Executando testes de integração
+        run: |
+          dotnet test test/CatalogAPI.Infrastructure.Tests --no-build -c Release
+          dotnet test test/CatalogAPI.API.Tests --no-build -c Release
+
+  container-test:
+    name: Execução de testes em container
+    runs-on: ubuntu-latest
+    # Só testa a imagem se os testes .NET passaram.
+    needs: test
+
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Construindo imagem Docker
+        run: docker build -f src/CatalogAPI.API/Dockerfile -t fcg-catalog-api:ci .
+
+      - name: Subindo dependências (PostgreSQL, Redis e RabbitMQ)
+        run: |
+          docker network create fcg
+          docker run -d --name catalogdb --network fcg \
+            -e POSTGRES_DB=catalogdb -e POSTGRES_USER=postgres -e POSTGRES_PASSWORD=pass \
+            --health-cmd "pg_isready -U postgres -d catalogdb" --health-interval 2s --health-retries 30 \
+            postgres:18
+          docker run -d --name redis --network fcg redis:7-alpine
+          docker run -d --name rabbitmq --network fcg \
+            -e RABBITMQ_DEFAULT_USER=guest -e RABBITMQ_DEFAULT_PASS=pass \
+            --health-cmd "rabbitmq-diagnostics -q check_running" --health-interval 5s --health-retries 24 \
+            rabbitmq:4-management
+          for i in $(seq 1 60); do
+            db=$(docker inspect -f '{{.State.Health.Status}}' catalogdb)
+            mq=$(docker inspect -f '{{.State.Health.Status}}' rabbitmq)
+            [ "$db" = "healthy" ] && [ "$mq" = "healthy" ] && exit 0
+            sleep 2
+          done
+          echo "::error::Dependências não ficaram saudáveis a tempo (PostgreSQL: $db, RabbitMQ: $mq)."
+          exit 1
+
+      - name: Subindo a API
+        run: |
+          docker run -d --name api --network fcg -p 8080:8080 \
+            -e ConnectionStrings__DefaultConnection="Host=catalogdb;Port=5432;Database=catalogdb;Username=postgres;Password=pass" \
+            -e ConnectionStrings__Redis="redis:6379,abortConnect=false" \
+            -e RabbitMq__Host=rabbitmq \
+            fcg-catalog-api:ci
+
+      - name: Smoke test (listagem de jogos)
+        run: |
+          for i in $(seq 1 30); do
+            status=$(curl -s -o /dev/null -w '%{http_code}' http://localhost:8080/api/v1/games || true)
+            [ "$status" = "200" ] && echo "API respondeu 200" && exit 0
+            sleep 2
+          done
+          echo "::error::API não respondeu 200 em GET /api/v1/games (último status: $status)."
+          exit 1
+
+      - name: Logs da API
+        if: always()
+        run: docker logs api || true

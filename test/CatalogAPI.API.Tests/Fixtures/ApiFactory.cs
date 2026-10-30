@@ -25,7 +25,6 @@ public class ApiFactory : WebApplicationFactory<Program>, IAsyncLifetime
     public const string TestSecretKey = "6a8a56f4d31a272d6e2f048f710c9cce45b51aa343fd6f73d8b69f1218eaac56";
 
     private readonly PostgreSqlContainer _container = new PostgreSqlBuilder("postgres:18")
-        .WithImagePullPolicy(_ => false)
         .WithDatabase("catalogdb_apitest")
         .WithUsername("postgres")
         .WithPassword("pass")
