@@ -6,5 +6,5 @@ namespace CatalogAPI.Domain.Contexts.Libraries.Queries;
 public interface IGetGameAndCheckOwnership
 {
     Task<(Game? Game, bool AlreadyOwns)> ExecuteAsync(LibraryItem item, CancellationToken cancellationToken);
-    
+
 }

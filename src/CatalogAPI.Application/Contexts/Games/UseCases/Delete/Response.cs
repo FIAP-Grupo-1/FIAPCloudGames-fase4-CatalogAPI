@@ -4,7 +4,7 @@ namespace CatalogAPI.Application.Contexts.Games.UseCases.Delete;
 
 public class Response : Shared.Response
 {
-    
+
     #region Constructors
 
     public Response()

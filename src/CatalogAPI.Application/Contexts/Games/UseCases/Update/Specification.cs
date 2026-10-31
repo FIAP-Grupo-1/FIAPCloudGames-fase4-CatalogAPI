@@ -10,9 +10,9 @@ public static class Specification
     public static Contract<Notification> Ensure(Request request)
     {
         var contract = new Contract<Notification>();
-        
+
         contract.AreNotEquals(request.Id, Guid.Empty, "Id", "Id is required.");
-        
+
         if (request.Title is not null)
             contract
                 .IsGreaterOrEqualsThan(request.Title, 3, "Title", "Title must contain at least 3 characters.")

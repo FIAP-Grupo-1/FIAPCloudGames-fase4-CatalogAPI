@@ -6,13 +6,11 @@ namespace CatalogAPI.API.Tests.Libraries.Endpoints;
 // Guards the JWT signature/lifetime validation configured in BuilderExtension.AddBearerAuthentication:
 // the API must reject any token it cannot prove was issued by the UsersAPI (shared secret key).
 [Collection("Api")]
-public class LibraryAuthenticationTests : IAsyncLifetime
+public class LibraryAuthenticationTests(ApiFactory factory) : IAsyncLifetime
 {
     private const string Endpoint = "/api/v1/library";
 
-    private readonly ApiFactory _factory;
-
-    public LibraryAuthenticationTests(ApiFactory factory) => _factory = factory;
+    private readonly ApiFactory _factory = factory;
 
     public async Task InitializeAsync() => await _factory.ResetDatabaseAsync();
     public Task DisposeAsync() => Task.CompletedTask;

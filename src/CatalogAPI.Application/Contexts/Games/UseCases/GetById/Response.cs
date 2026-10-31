@@ -10,7 +10,7 @@ public class Response : Shared.Response
     public DetailGameResponse? Game { get; private set; }
 
     #endregion
-    
+
     #region Constructors
 
     protected Response() { }

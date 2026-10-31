@@ -15,7 +15,7 @@ public class Game : Entity
     public GameGenre Genre { get; private set; }
     public GameStatus Status { get; private set; }
     public DateOnly ReleaseDate { get; private set; }
-    
+
     private List<IDomainEvent> _domainEvents = [];
     public IReadOnlyCollection<IDomainEvent> DomainEvents => _domainEvents.AsReadOnly();
 
@@ -92,5 +92,5 @@ public class Game : Entity
     public void ClearDomainEvents() => _domainEvents.Clear();
 
     #endregion
-    
+
 }

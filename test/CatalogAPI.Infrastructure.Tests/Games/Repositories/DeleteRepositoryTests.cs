@@ -7,12 +7,10 @@ using Microsoft.EntityFrameworkCore;
 namespace CatalogAPI.Infrastructure.Tests.Games.Repositories;
 
 [Collection("Database")]
-public class DeleteRepositoryTests : IAsyncLifetime
+public class DeleteRepositoryTests(DatabaseFixture fixture) : IAsyncLifetime
 {
-    private readonly DatabaseFixture _fixture;
+    private readonly DatabaseFixture _fixture = fixture;
     private static readonly DateOnly Tomorrow = DateOnly.FromDateTime(DateTime.UtcNow.AddDays(1));
-
-    public DeleteRepositoryTests(DatabaseFixture fixture) => _fixture = fixture;
 
     public async Task InitializeAsync()
     {

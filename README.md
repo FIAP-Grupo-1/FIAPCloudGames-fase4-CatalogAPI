@@ -268,6 +268,16 @@ O workflow `.github/workflows/test.yml` roda em todo pull request:
 
 O build e o push da imagem no ECR ficam no `ecr-push.yml`.
 
+### Lint
+
+O workflow `.github/workflows/lint.yml` roda em todo pull request: executa o `dotnet format` com as regras do `.editorconfig`, faz o commit da formatação na própria branch do PR e depois checa o resultado. Ele **não bloqueia o merge**: o que não puder ser corrigido automaticamente aparece como aviso.
+
+Quando o bot fizer esse commit, rode `git pull` antes de continuar na branch. Para formatar localmente antes de subir:
+
+```bash
+dotnet format
+```
+
 ### Segurança
 
 O workflow `.github/workflows/security.yml` roda em todo pull request, em push na `main`, toda segunda-feira (CVEs novas aparecem sem mudança no código) e manualmente pela aba Actions. Ele funciona em **modo relatório**: mostra o que encontrou no resumo da execução (Summary) e como avisos no PR, mas **nunca falha nem bloqueia o merge**.

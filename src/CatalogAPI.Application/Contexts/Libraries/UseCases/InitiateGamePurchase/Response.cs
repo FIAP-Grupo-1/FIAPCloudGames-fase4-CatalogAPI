@@ -4,7 +4,7 @@ namespace CatalogAPI.Application.Contexts.Libraries.UseCases.InitiateGamePurchas
 
 public class Response : Shared.Response
 {
-    protected Response() {  }
+    protected Response() { }
 
     public Response(string message)
     {

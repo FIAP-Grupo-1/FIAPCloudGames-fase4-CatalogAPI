@@ -1,0 +1,75 @@
+# Formata o código do PR com o dotnet format, faz o commit na própria branch e depois
+# checa o resultado. Não bloqueia o merge: o que o dotnet format não conseguir corrigir
+# aparece como aviso no PR.
+#
+# Pushes feitos com o GITHUB_TOKEN não disparam outros workflows, então os testes não
+# rodam de novo para o commit de formatação.
+name: Lint
+
+on: pull_request
+
+permissions:
+  contents: write # commit da formatação na branch do PR
+
+jobs:
+  lint:
+    name: Formatação e estilo
+    runs-on: ubuntu-latest
+    # PRs de fork e do Dependabot não têm permissão de escrita na branch.
+    if: >-
+      github.event.pull_request.head.repo.full_name == github.repository
+      && github.event.pull_request.user.login != 'dependabot[bot]'
+
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.head_ref }}
+
+      - name: Configurando .NET
+        uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68 # v6.0.0
+        with:
+          dotnet-version: 10.0.x
+
+      - name: Restaurando dependências
+        run: dotnet restore
+
+      - name: Formatando o código
+        continue-on-error: true
+        run: dotnet format --no-restore
+
+      - name: Commitando a formatação
+        continue-on-error: true
+        run: |
+          if git diff --quiet; then
+            echo "Nada a formatar."
+            exit 0
+          fi
+
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git commit -am "style: formatação automática (dotnet format)"
+          git push
+
+          {
+            echo "## Lint"
+            echo "Formatação aplicada e commitada na branch. Rode \`git pull\` antes de continuar."
+          } >> "$GITHUB_STEP_SUMMARY"
+          echo "::notice title=Formatação automática::Commit de formatação enviado para a branch. Rode git pull antes de continuar."
+
+      - name: Checando o resultado
+        continue-on-error: true
+        run: |
+          if dotnet format --verify-no-changes --no-restore > format.log 2>&1; then
+            echo "Código dentro do padrão."
+            exit 0
+          fi
+
+          {
+            echo "## Lint"
+            echo "O \`dotnet format\` não conseguiu corrigir tudo sozinho:"
+            echo
+            echo '```'
+            grep -E 'warning|error' format.log | sed "s#$GITHUB_WORKSPACE/##"
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+          echo "::warning title=Lint::Ainda há problemas que o dotnet format não corrige sozinho. Veja o Summary."

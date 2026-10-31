@@ -7,10 +7,10 @@ using CatalogAPI.API.Tests.Fixtures;
 namespace CatalogAPI.API.Tests.Games.Endpoints;
 
 [Collection("Api")]
-public class UpdateGameEndpointTests : IAsyncLifetime
+public class UpdateGameEndpointTests(ApiFactory factory) : IAsyncLifetime
 {
-    private readonly ApiFactory _factory;
-    private readonly HttpClient _client;
+    private readonly ApiFactory _factory = factory;
+    private readonly HttpClient _client = factory.CreateApiClient();
 
     private static readonly JsonSerializerOptions JsonOptions = new()
     {
@@ -19,12 +19,6 @@ public class UpdateGameEndpointTests : IAsyncLifetime
     };
 
     private static readonly DateOnly Tomorrow = DateOnly.FromDateTime(DateTime.UtcNow.AddDays(1));
-
-    public UpdateGameEndpointTests(ApiFactory factory)
-    {
-        _factory = factory;
-        _client = factory.CreateApiClient();
-    }
 
     public async Task InitializeAsync() => await _factory.ResetDatabaseAsync();
     public Task DisposeAsync() => Task.CompletedTask;

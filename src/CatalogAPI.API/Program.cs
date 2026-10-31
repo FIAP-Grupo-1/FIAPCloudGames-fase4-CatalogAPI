@@ -33,7 +33,7 @@ if (app.Environment.IsDevelopment())
 
 app.UseHttpsRedirection();
 
-app.MapGame(); 
+app.MapGame();
 app.MapLibrary();
 
 app.Run();

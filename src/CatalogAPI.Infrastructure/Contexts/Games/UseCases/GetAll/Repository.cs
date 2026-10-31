@@ -16,7 +16,7 @@ public class Repository(AppDbContext context) : IGetAll
             .Skip((page - 1) * pageSize)
             .Take(pageSize)
             .ToListAsync(cancellationToken);
-        
+
         return (games, total);
     }
 }

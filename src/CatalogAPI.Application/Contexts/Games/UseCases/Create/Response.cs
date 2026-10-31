@@ -6,13 +6,13 @@ namespace CatalogAPI.Application.Contexts.Games.UseCases.Create;
 public class Response : Shared.Response
 {
     #region Properties
-    
+
     public CreateGameResponse? Game { get; private set; }
-    
+
     #endregion
-    
+
     #region Constructors
-    
+
     protected Response() { }
 
     public Response(string message, CreateGameResponse game)
@@ -32,6 +32,6 @@ public class Response : Shared.Response
         StatusCode = statusCode;
         Notifications = notifications;
     }
-    
+
     #endregion
 }

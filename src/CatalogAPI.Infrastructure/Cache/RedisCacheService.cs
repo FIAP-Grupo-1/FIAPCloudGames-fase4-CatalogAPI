@@ -1,8 +1,5 @@
 ﻿using CatalogAPI.Application.Shared.Cache;
 using StackExchange.Redis;
-using System;
-using System.Collections.Generic;
-using System.Text;
 using System.Text.Json;
 
 namespace CatalogAPI.Infrastructure.Cache

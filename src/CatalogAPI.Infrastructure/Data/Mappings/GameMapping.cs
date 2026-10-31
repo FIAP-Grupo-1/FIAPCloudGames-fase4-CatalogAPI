@@ -11,7 +11,7 @@ public class GameMapping : IEntityTypeConfiguration<Game>
     {
         builder.ToTable("games");
         builder.HasKey(g => g.Id);
-        
+
         builder.Property(g => g.Id).HasColumnName("id");
         builder.Property(g => g.CreatedAt).HasColumnName("created_at");
         builder.Property(g => g.UpdatedAt).HasColumnName("updated_at");
@@ -26,7 +26,7 @@ public class GameMapping : IEntityTypeConfiguration<Game>
 
         builder.ComplexProperty(g => g.Price, priceBuilder =>
         {
-            priceBuilder.Property(p => p.Amount) 
+            priceBuilder.Property(p => p.Amount)
                 .HasColumnName("price")
                 .HasColumnType("numeric(18,2)")
                 .IsRequired();
@@ -39,12 +39,12 @@ public class GameMapping : IEntityTypeConfiguration<Game>
 
         builder.Property(g => g.Genre)
             .HasColumnName("genre")
-            .HasConversion<string>() 
+            .HasConversion<string>()
             .IsRequired();
 
         builder.Property(g => g.Status)
             .HasColumnName("status")
-            .HasConversion<string>() 
+            .HasConversion<string>()
             .IsRequired();
 
         builder.Property(g => g.ReleaseDate)

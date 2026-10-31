@@ -1,5 +1,4 @@
 using System.Net;
-using System.Net.Http.Json;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 using CatalogAPI.API.Tests.Fixtures;
@@ -8,22 +7,16 @@ using CatalogAPI.Domain.Contexts.Games.Enums;
 namespace CatalogAPI.API.Tests.Games.Endpoints;
 
 [Collection("Api")]
-public class GetAllGamesEndpointTests : IAsyncLifetime
+public class GetAllGamesEndpointTests(ApiFactory factory) : IAsyncLifetime
 {
-    private readonly ApiFactory _factory;
-    private readonly HttpClient _client;
+    private readonly ApiFactory _factory = factory;
+    private readonly HttpClient _client = factory.CreateApiClient();
 
     private static readonly JsonSerializerOptions JsonOptions = new()
     {
         PropertyNameCaseInsensitive = true,
         Converters = { new JsonStringEnumConverter() }
     };
-
-    public GetAllGamesEndpointTests(ApiFactory factory)
-    {
-        _factory = factory;
-        _client = factory.CreateApiClient();
-    }
 
     public async Task InitializeAsync() => await _factory.ResetDatabaseAsync();
     public Task DisposeAsync() => Task.CompletedTask;

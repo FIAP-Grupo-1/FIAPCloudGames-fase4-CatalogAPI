@@ -15,7 +15,7 @@ public class Response : Shared.Response
 
     public Response(string message, PagedLibraryResponse? library)
     {
-        Message =  message;
+        Message = message;
         Library = library;
         StatusCode = 200;
     }
