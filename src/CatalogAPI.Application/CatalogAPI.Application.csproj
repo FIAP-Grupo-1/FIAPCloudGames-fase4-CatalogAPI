@@ -9,9 +9,9 @@
   <ItemGroup>
     <PackageReference Include="FiapCloudGames.Contracts" Version="7.0.0" />
     <PackageReference Include="Flunt" Version="2.0.5" />
-    <PackageReference Include="MediatR" Version="12.2.0" />
-    <PackageReference Include="Microsoft.Extensions.DependencyInjection.Abstractions" Version="10.0" />
-    <PackageReference Include="Microsoft.Extensions.Logging.Abstractions" Version="10.0" />
+    <PackageReference Include="MediatR" Version="14.2.0" />
+    <PackageReference Include="Microsoft.Extensions.DependencyInjection.Abstractions" Version="10.0.14" />
+    <PackageReference Include="Microsoft.Extensions.Logging.Abstractions" Version="10.0.14" />
   </ItemGroup>
 
   <ItemGroup>
