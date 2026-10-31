@@ -1,0 +1,25 @@
+# Atualizações automáticas de dependências. As PRs abertas pelo Dependabot não
+# bloqueiam nada: servem para mostrar o que está desatualizado e facilitar a correção.
+version: 2
+updates:
+  - package-ecosystem: nuget
+    directory: /
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 5
+    groups:
+      nuget:
+        patterns: ['*']
+
+  - package-ecosystem: docker
+    directory: /src/CatalogAPI.API
+    schedule:
+      interval: weekly
+
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+    groups:
+      github-actions:
+        patterns: ['*']

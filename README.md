@@ -268,6 +268,33 @@ O workflow `.github/workflows/test.yml` roda em todo pull request:
 
 O build e o push da imagem no ECR ficam no `ecr-push.yml`.
 
+### Segurança
+
+O workflow `.github/workflows/security.yml` roda em todo pull request, em push na `main`, toda segunda-feira (CVEs novas aparecem sem mudança no código) e manualmente pela aba Actions. Ele funciona em **modo relatório**: mostra o que encontrou no resumo da execução (Summary) e como avisos no PR, mas **nunca falha nem bloqueia o merge**.
+
+| Job | O que verifica | Ferramenta |
+|---|---|---|
+| `dependencies` | Pacotes NuGet com vulnerabilidade conhecida, inclusive transitivos | `dotnet list package --vulnerable` |
+| `image` | Pacotes do sistema e do .NET na imagem Docker (MEDIUM ou maior, com correção disponível) | Trivy |
+| `secrets` | Chaves, tokens e senhas commitados em todo o histórico do git | Gitleaks |
+| `codeql` | Falhas de segurança no código C# (alertas na aba **Security** do repositório) | CodeQL |
+
+O `.github/dependabot.yml` abre PRs semanais atualizando pacotes NuGet, a imagem base do Dockerfile e as GitHub Actions.
+
+Para rodar os mesmos scans localmente (só precisa de Docker):
+
+```bash
+# Dependências
+dotnet list package --vulnerable --include-transitive
+
+# Imagem
+docker build --pull -f src/CatalogAPI.API/Dockerfile -t catalog-api:scan .
+docker run --rm -v /var/run/docker.sock:/var/run/docker.sock aquasec/trivy:0.76.1 image --severity MEDIUM,HIGH,CRITICAL --ignore-unfixed catalog-api:scan
+
+# Segredos
+docker run --rm -v "$PWD:/repo:ro" zricethezav/gitleaks:v8.30.1 git /repo --redact
+```
+
 ---
 
 ## Configuração

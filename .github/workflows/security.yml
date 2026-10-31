@@ -1,0 +1,148 @@
+# Verificação de vulnerabilidades em modo RELATÓRIO: os jobs mostram o que encontraram
+# no resumo da execução (Summary) e como avisos no PR, mas nunca falham, então não
+# bloqueiam o merge. Os alertas do CodeQL aparecem na aba Security do repositório.
+#
+# Ferramentas fixadas por SHA/digest (o Trivy e a trivy-action tiveram tags
+# comprometidas em março/2026, CVE-2026-33634).
+name: Security Scan
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+  schedule:
+    - cron: '0 6 * * 1' # toda segunda, 06:00 UTC: CVEs novas aparecem sem mudança no código
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  DOCKERFILE: src/CatalogAPI.API/Dockerfile
+  IMAGE: catalog-api:scan
+  TRIVY_IMAGE: aquasec/trivy:0.76.1@sha256:790fd66d1697395d8693d1acaa1ea702406a20f109b6fc7bac8db623eca6c06c
+  GITLEAKS_IMAGE: zricethezav/gitleaks:v8.30.1@sha256:c00b6bd0aeb3071cbcb79009cb16a60dd9e0a7c60e2be9ab65d25e6bc8abbb7f
+
+jobs:
+  dependencies:
+    name: Dependências NuGet
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Configurando .NET
+        uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68 # v6.0.0
+        with:
+          dotnet-version: 10.0.x
+
+      - name: Verificando pacotes vulneráveis
+        continue-on-error: true
+        run: |
+          dotnet restore
+          dotnet list package --vulnerable --include-transitive --format json > vulnerable.json
+
+          jq -r '.projects[] | (.path | split("/") | last) as $proj
+                 | .frameworks[]? | (.topLevelPackages[]?, .transitivePackages[]?) as $pkg
+                 | $pkg.vulnerabilities[]?
+                 | [$proj, $pkg.id, $pkg.resolvedVersion, .severity, .advisoryurl] | @tsv' vulnerable.json > found.tsv
+
+          {
+            echo "## Dependências NuGet"
+            if [ -s found.tsv ]; then
+              echo "$(wc -l < found.tsv) vulnerabilidade(s) encontrada(s):"
+              echo
+              echo "| Projeto | Pacote | Versão | Severidade | Advisory |"
+              echo "|---|---|---|---|---|"
+              awk -F'\t' '{printf "| %s | %s | %s | %s | %s |\n", $1, $2, $3, $4, $5}' found.tsv
+            else
+              echo "Nenhum pacote vulnerável encontrado."
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"
+
+          awk -F'\t' '{printf "::warning title=NuGet vulnerável (%s)::%s %s em %s - %s\n", $4, $2, $3, $1, $5}' found.tsv
+
+  image:
+    name: Imagem Docker (Trivy)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Construindo imagem Docker
+        run: docker build --pull -f "$DOCKERFILE" -t "$IMAGE" .
+
+      - name: Verificando vulnerabilidades da imagem
+        continue-on-error: true
+        run: |
+          docker run --rm -v /var/run/docker.sock:/var/run/docker.sock "$TRIVY_IMAGE" \
+            image --quiet --severity MEDIUM,HIGH,CRITICAL --ignore-unfixed --format json "$IMAGE" > trivy.json
+
+          jq -r '.Results[] | .Target as $t | .Vulnerabilities[]?
+                 | [.Severity, .VulnerabilityID, .PkgName, .InstalledVersion, (.FixedVersion // "-"), $t] | @tsv' trivy.json > found.tsv
+
+          {
+            echo "## Imagem Docker (Trivy)"
+            echo "Severidade MEDIUM ou maior, só vulnerabilidades com correção disponível."
+            echo
+            if [ -s found.tsv ]; then
+              echo "$(wc -l < found.tsv) vulnerabilidade(s) encontrada(s):"
+              echo
+              echo "| Severidade | CVE | Pacote | Instalada | Corrigida em | Alvo |"
+              echo "|---|---|---|---|---|---|"
+              awk -F'\t' '{printf "| %s | %s | %s | %s | %s | %s |\n", $1, $2, $3, $4, $5, $6}' found.tsv
+            else
+              echo "Nenhuma vulnerabilidade encontrada."
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"
+
+          awk -F'\t' '{printf "::warning title=Imagem vulnerável (%s)::%s em %s %s (corrigida em %s)\n", $1, $2, $3, $4, $5}' found.tsv
+
+  secrets:
+    name: Segredos (Gitleaks)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0 # histórico completo: o segredo pode estar num commit antigo
+
+      - name: Procurando segredos no histórico
+        continue-on-error: true
+        run: |
+          docker run --rm -v "$PWD:/repo:ro" -v "$RUNNER_TEMP:/out" "$GITLEAKS_IMAGE" \
+            git /repo --redact --no-banner --exit-code 0 --report-format json --report-path /out/gitleaks.json
+
+          jq -r '.[] | [.RuleID, .File, (.StartLine | tostring), .Commit[0:7]] | @tsv' "$RUNNER_TEMP/gitleaks.json" > found.tsv
+
+          {
+            echo "## Segredos (Gitleaks)"
+            if [ -s found.tsv ]; then
+              echo "$(wc -l < found.tsv) possível(is) segredo(s) encontrado(s) (valores omitidos):"
+              echo
+              echo "| Regra | Arquivo | Linha | Commit |"
+              echo "|---|---|---|---|"
+              awk -F'\t' '{printf "| %s | %s | %s | %s |\n", $1, $2, $3, $4}' found.tsv
+            else
+              echo "Nenhum segredo encontrado."
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"
+
+          awk -F'\t' '{printf "::warning file=%s,line=%s,title=Possível segredo (%s)::Encontrado no commit %s\n", $2, $3, $1, $4}' found.tsv
+
+  codeql:
+    name: Código (CodeQL)
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      security-events: write # envia os alertas para a aba Security
+      actions: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - uses: github/codeql-action/init@9b3254085494b55a0f7c4c2b3d2d52cc712ce370 # v4.39.1
+        with:
+          languages: csharp
+          build-mode: none
+
+      - uses: github/codeql-action/analyze@9b3254085494b55a0f7c4c2b3d2d52cc712ce370 # v4.39.1
+        continue-on-error: true
+        with:
+          category: /language:csharp
