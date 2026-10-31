@@ -11,7 +11,7 @@ public static class GameEndpoints
     {
         var group = builder.MapGroup("/api/v1/games")
             .WithTags("Games");
-        
+
         group.MapPost("/", CreateAsync)
             .WithName("CreateGame");
 
@@ -37,7 +37,7 @@ public static class GameEndpoints
 
         if (!response.IsSuccess)
             return Results.Json(response, statusCode: response.StatusCode);
-        
+
         return Results.Created($"/api/v1/games/{response.Game?.Id}", response);
     }
 
@@ -50,7 +50,7 @@ public static class GameEndpoints
 
         if (!response.IsSuccess)
             return Results.Json(response, statusCode: response.StatusCode);
-        
+
         return Results.Ok(response);
     }
 
@@ -64,7 +64,7 @@ public static class GameEndpoints
 
         if (!response.IsSuccess)
             return Results.Json(response, statusCode: response.StatusCode);
-        
+
         return Results.Ok(response);
     }
 
@@ -79,7 +79,7 @@ public static class GameEndpoints
 
         if (!response.IsSuccess)
             return Results.Json(response, statusCode: response.StatusCode);
-        
+
         return Results.NoContent();
     }
 
@@ -101,7 +101,7 @@ public static class GameEndpoints
 
         if (!response.IsSuccess)
             return Results.Json(response, statusCode: response.StatusCode);
-        
+
         return Results.NoContent();
     }
 }

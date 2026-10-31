@@ -4,7 +4,6 @@ using CatalogAPI.Application.Shared.Messaging;
 using FiapCloudGames.Contracts;
 using FiapCloudGames.RabbitMq.Publishers;
 using Microsoft.Extensions.Logging;
-using NewRelic.Api.Agent;
 
 namespace CatalogAPI.Infrastructure.Contexts.Libraries.Messaging;
 

@@ -12,7 +12,7 @@ public class Handler(IGetLibrary getLibraryQuery, ICacheService cacheService) : 
         var cacheKey = $"libraries:all:userId={request.UserId}:page={request.Page}:size={request.PageSize}";
 
         var res = Specification.Ensure(request);
-        
+
         if (!res.IsValid)
         {
             return new Response(
@@ -22,11 +22,11 @@ public class Handler(IGetLibrary getLibraryQuery, ICacheService cacheService) : 
             );
         }
 
-        var pagedLibraryResponse  = await cacheService.GetOrSetAsync(
+        var pagedLibraryResponse = await cacheService.GetOrSetAsync(
             cacheKey,
             async () =>
             {
-                var(games, totalCount) = await getLibraryQuery.ExecuteAsync(
+                var (games, totalCount) = await getLibraryQuery.ExecuteAsync(
                     request.UserId,
                     request.Page,
                     request.PageSize,
@@ -51,7 +51,7 @@ public class Handler(IGetLibrary getLibraryQuery, ICacheService cacheService) : 
             cancellationToken
         );
 
-        
+
 
         return new Response("User library retrieved successfully.", pagedLibraryResponse);
     }

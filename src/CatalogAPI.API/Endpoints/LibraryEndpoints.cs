@@ -26,9 +26,9 @@ public static class LibraryEndpoints
         ISender sender,
         CancellationToken cancellationToken)
     {
-        var userIdClaim = user.FindFirst("sub")?.Value 
+        var userIdClaim = user.FindFirst("sub")?.Value
                           ?? user.FindFirst(ClaimTypes.NameIdentifier)?.Value;
-        
+
         if (string.IsNullOrEmpty(userIdClaim) || !Guid.TryParse(userIdClaim, out var userId))
             return Results.Unauthorized();
 
@@ -49,7 +49,7 @@ public static class LibraryEndpoints
         CancellationToken cancellationToken
         )
     {
-        var userIdClaim = user.FindFirst("sub")?.Value 
+        var userIdClaim = user.FindFirst("sub")?.Value
                           ?? user.FindFirst(ClaimTypes.NameIdentifier)?.Value;
 
         if (string.IsNullOrEmpty(userIdClaim) || !Guid.TryParse(userIdClaim, out var userId))
@@ -57,10 +57,10 @@ public static class LibraryEndpoints
 
         var request = new Application.Contexts.Libraries.UseCases.InitiateGamePurchase.Request(userId, body.GameId);
         var response = await sender.Send(request, cancellationToken);
-        
+
         if (!response.IsSuccess)
             return Results.Json(response, statusCode: response.StatusCode);
-        
+
         return Results.Accepted();
     }
 }

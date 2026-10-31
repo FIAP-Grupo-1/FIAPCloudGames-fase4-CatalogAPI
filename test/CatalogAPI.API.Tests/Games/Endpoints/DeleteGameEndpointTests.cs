@@ -4,16 +4,10 @@ using CatalogAPI.API.Tests.Fixtures;
 namespace CatalogAPI.API.Tests.Games.Endpoints;
 
 [Collection("Api")]
-public class DeleteGameEndpointTests : IAsyncLifetime
+public class DeleteGameEndpointTests(ApiFactory factory) : IAsyncLifetime
 {
-    private readonly ApiFactory _factory;
-    private readonly HttpClient _client;
-
-    public DeleteGameEndpointTests(ApiFactory factory)
-    {
-        _factory = factory;
-        _client = factory.CreateApiClient();
-    }
+    private readonly ApiFactory _factory = factory;
+    private readonly HttpClient _client = factory.CreateApiClient();
 
     public async Task InitializeAsync() => await _factory.ResetDatabaseAsync();
     public Task DisposeAsync() => Task.CompletedTask;

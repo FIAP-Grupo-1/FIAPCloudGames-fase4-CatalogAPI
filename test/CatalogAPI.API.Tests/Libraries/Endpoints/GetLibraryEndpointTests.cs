@@ -6,11 +6,9 @@ using CatalogAPI.Domain.Contexts.Games.Enums;
 namespace CatalogAPI.API.Tests.Libraries.Endpoints;
 
 [Collection("Api")]
-public class GetLibraryEndpointTests : IAsyncLifetime
+public class GetLibraryEndpointTests(ApiFactory factory) : IAsyncLifetime
 {
-    private readonly ApiFactory _factory;
-
-    public GetLibraryEndpointTests(ApiFactory factory) => _factory = factory;
+    private readonly ApiFactory _factory = factory;
 
     public async Task InitializeAsync() => await _factory.ResetDatabaseAsync();
     public Task DisposeAsync() => Task.CompletedTask;

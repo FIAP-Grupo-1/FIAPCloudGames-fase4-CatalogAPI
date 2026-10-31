@@ -19,7 +19,7 @@ public class Handler(IGetAll repository, ICacheService cacheService) : IRequestH
             cacheKey,
             async () =>
             {
-                var(games, total) = await repository.GetAllAsync(request.Page, request.PageSize, cancellationToken);
+                var (games, total) = await repository.GetAllAsync(request.Page, request.PageSize, cancellationToken);
 
                 var gamesFormatted = games.Select(game =>
                     new SummaryGameResponse(game.Id, game.Title.Value, game.Price.Amount, game.Genre));

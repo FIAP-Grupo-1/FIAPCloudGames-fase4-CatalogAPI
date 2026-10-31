@@ -5,7 +5,6 @@ using CatalogAPI.Domain.Contexts.Games.Exceptions;
 using CatalogAPI.Domain.Contexts.Libraries.Entities;
 using CatalogAPI.Domain.Contexts.Libraries.Exceptions;
 using CatalogAPI.Domain.Contexts.Libraries.Queries;
-using CatalogAPI.Domain.Shared;
 using CatalogAPI.Application.Shared.Messaging;
 using FiapCloudGames.Contracts.Catalog;
 using NSubstitute;

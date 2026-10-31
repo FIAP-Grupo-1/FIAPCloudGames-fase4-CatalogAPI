@@ -5,11 +5,9 @@ using CatalogAPI.API.Tests.Fixtures;
 namespace CatalogAPI.API.Tests.Libraries.Endpoints;
 
 [Collection("Api")]
-public class AddGameToLibraryEndpointTests : IAsyncLifetime
+public class AddGameToLibraryEndpointTests(ApiFactory factory) : IAsyncLifetime
 {
-    private readonly ApiFactory _factory;
-
-    public AddGameToLibraryEndpointTests(ApiFactory factory) => _factory = factory;
+    private readonly ApiFactory _factory = factory;
 
     public async Task InitializeAsync() => await _factory.ResetDatabaseAsync();
     public Task DisposeAsync() => Task.CompletedTask;

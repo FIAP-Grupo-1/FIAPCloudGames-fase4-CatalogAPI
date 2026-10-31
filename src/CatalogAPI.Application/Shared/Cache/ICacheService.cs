@@ -1,8 +1,4 @@
-﻿using System;
-using System.Collections.Generic;
-using System.Text;
-
-namespace CatalogAPI.Application.Shared.Cache
+﻿namespace CatalogAPI.Application.Shared.Cache
 {
     public interface ICacheService
     {

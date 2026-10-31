@@ -7,12 +7,10 @@ using Microsoft.EntityFrameworkCore;
 namespace CatalogAPI.Infrastructure.Tests.Games.Repositories;
 
 [Collection("Database")]
-public class CreateRepositoryTests : IAsyncLifetime
+public class CreateRepositoryTests(DatabaseFixture fixture) : IAsyncLifetime
 {
-    private readonly DatabaseFixture _fixture;
+    private readonly DatabaseFixture _fixture = fixture;
     private static readonly DateOnly Tomorrow = DateOnly.FromDateTime(DateTime.UtcNow.AddDays(1));
-
-    public CreateRepositoryTests(DatabaseFixture fixture) => _fixture = fixture;
 
     public async Task InitializeAsync()
     {

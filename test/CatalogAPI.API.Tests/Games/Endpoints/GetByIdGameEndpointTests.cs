@@ -6,22 +6,16 @@ using CatalogAPI.API.Tests.Fixtures;
 namespace CatalogAPI.API.Tests.Games.Endpoints;
 
 [Collection("Api")]
-public class GetByIdGameEndpointTests : IAsyncLifetime
+public class GetByIdGameEndpointTests(ApiFactory factory) : IAsyncLifetime
 {
-    private readonly ApiFactory _factory;
-    private readonly HttpClient _client;
+    private readonly ApiFactory _factory = factory;
+    private readonly HttpClient _client = factory.CreateApiClient();
 
     private static readonly JsonSerializerOptions JsonOptions = new()
     {
         PropertyNameCaseInsensitive = true,
         Converters = { new JsonStringEnumConverter() }
     };
-
-    public GetByIdGameEndpointTests(ApiFactory factory)
-    {
-        _factory = factory;
-        _client = factory.CreateApiClient();
-    }
 
     public async Task InitializeAsync() => await _factory.ResetDatabaseAsync();
     public Task DisposeAsync() => Task.CompletedTask;

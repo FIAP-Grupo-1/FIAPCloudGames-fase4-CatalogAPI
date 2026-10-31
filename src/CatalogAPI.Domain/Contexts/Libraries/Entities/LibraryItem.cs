@@ -10,7 +10,7 @@ public class LibraryItem : Entity
     public DateTime AcquiredOn { get; private set; }
 
     protected LibraryItem() { }
-    
+
     public LibraryItem(Guid userId, Guid gameId)
     {
         UserId = userId;

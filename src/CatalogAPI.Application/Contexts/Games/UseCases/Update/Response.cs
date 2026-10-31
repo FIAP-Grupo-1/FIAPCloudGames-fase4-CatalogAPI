@@ -20,6 +20,6 @@ public class Response : Shared.Response
         StatusCode = statusCode;
         Notifications = notifications;
     }
-    
+
     #endregion
 }
