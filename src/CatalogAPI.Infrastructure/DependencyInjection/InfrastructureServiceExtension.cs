@@ -82,8 +82,17 @@ public static class InfrastructureServiceExtension
     }
     private static void AddRedis(IServiceCollection services, IConfiguration configuration)
     {
+        var cacheEnabled = configuration.GetValue("Cache:Enabled", true);
+
+        if (!cacheEnabled)
+        {
+            services.AddSingleton<ICacheService, NoOpCacheService>();
+            return;
+        }
+
         services.AddSingleton<IConnectionMultiplexer>(sp =>
-            ConnectionMultiplexer.Connect(configuration.GetConnectionString("Redis")));
+            ConnectionMultiplexer.Connect(
+                configuration.GetConnectionString("Redis")));
 
         services.AddSingleton<ICacheService, RedisCacheService>();
     }
