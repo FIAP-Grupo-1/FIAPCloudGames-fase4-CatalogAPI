@@ -1,6 +1,7 @@
 # Build da imagem Docker e push no ECR (fcg/catalog-api).
 #
 # - pull_request: só builda, sem tocar na AWS (PRs de fork não recebem token OIDC).
+# - push na main ou tag v*: roda build e testes unitários antes; se falharem, nada é publicado.
 # - push na main: publica sha-<commit> (expira em 15 dias pela lifecycle policy do ECR).
 # - push de tag v*: publica a tag de release (nunca expira; use esta em produção).
 # - depois de todo push (main ou tag), o job deploy troca a imagem do catalog-api no
@@ -47,8 +48,32 @@ jobs:
       - name: Build da imagem
         run: docker build -f "$DOCKERFILE" -t "$ECR_REPOSITORY:pr-${{ github.event.number }}" .
 
+  # Build & Test no push: a imagem só é publicada (e implantada) se os testes passarem.
+  # Em PR quem testa é o test.yml (unitários, integração e container).
+  test:
+    name: Build e testes unitários
+    if: github.event_name == 'push'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68 # v6.0.0
+        with:
+          dotnet-version: 10.0.x
+
+      - name: Restaurar e compilar
+        run: |
+          dotnet restore
+          dotnet build --no-restore -c Release
+
+      - name: Testes unitários
+        run: |
+          dotnet test test/CatalogAPI.Domain.Tests --no-build -c Release
+          dotnet test test/CatalogAPI.Application.Tests --no-build -c Release
+
   push:
     name: Build e push no ECR
+    needs: test
     if: github.event_name == 'push'
     runs-on: ubuntu-latest
     permissions:
