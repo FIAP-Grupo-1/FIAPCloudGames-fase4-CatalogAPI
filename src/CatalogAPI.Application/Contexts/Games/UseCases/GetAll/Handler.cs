@@ -26,7 +26,7 @@ public class Handler(IGetAll repository, ICacheService cacheService) : IRequestH
 
                 return new PagedGameResponse(gamesFormatted, request.Page, request.PageSize, total);
             },
-            TimeSpan.FromMinutes(3),
+            CacheExpiration.GamesList,
             cancellationToken
         );
 

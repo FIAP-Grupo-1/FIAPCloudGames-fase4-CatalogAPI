@@ -47,7 +47,7 @@ public class Handler(IGetLibrary getLibraryQuery, ICacheService cacheService) : 
                     totalCount
                 );
             },
-            TimeSpan.FromMinutes(3),
+            CacheExpiration.UserLibrary,
             cancellationToken
         );
 
