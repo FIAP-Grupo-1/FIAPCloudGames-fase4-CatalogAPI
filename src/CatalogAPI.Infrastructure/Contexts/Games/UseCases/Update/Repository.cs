@@ -1,4 +1,5 @@
 using CatalogAPI.Domain.Contexts.Games.Commands;
+using CatalogAPI.Domain.Contexts.Games.Entities;
 using CatalogAPI.Domain.Contexts.Games.Enums;
 using CatalogAPI.Infrastructure.Data;
 using Microsoft.EntityFrameworkCore;
@@ -7,7 +8,7 @@ namespace CatalogAPI.Infrastructure.Contexts.Games.UseCases.Update;
 
 public class Repository(AppDbContext context) : IUpdate
 {
-    public async Task<bool> UpdateAsync(
+    public async Task<Game?> UpdateAsync(
         Guid id,
         string? title,
         string? description,
@@ -20,12 +21,12 @@ public class Repository(AppDbContext context) : IUpdate
         var game = await context.Games.FirstOrDefaultAsync(g => g.Id == id, cancellationToken);
 
         if (game is null)
-            return false;
+            return null;
 
         game.Update(title, description, price, genre, releaseDate, status);
 
         await context.SaveChangesAsync(cancellationToken);
 
-        return true;
+        return game;
     }
 }

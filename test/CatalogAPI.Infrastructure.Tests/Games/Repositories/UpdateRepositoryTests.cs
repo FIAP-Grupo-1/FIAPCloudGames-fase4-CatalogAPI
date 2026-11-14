@@ -30,7 +30,7 @@ public class UpdateRepositoryTests(DatabaseFixture fixture) : IAsyncLifetime
     }
 
     [Fact]
-    public async Task UpdateAsync_WithExistingGame_ShouldReturnTrue()
+    public async Task UpdateAsync_WithExistingGame_ShouldReturnUpdatedGame()
     {
         var seeded = await SeedGameAsync();
 
@@ -39,18 +39,20 @@ public class UpdateRepositoryTests(DatabaseFixture fixture) : IAsyncLifetime
 
         var result = await repo.UpdateAsync(seeded.Id, "Updated Title", null, null, null, null, null, CancellationToken.None);
 
-        Assert.True(result);
+        Assert.NotNull(result);
+        Assert.Equal(seeded.Id, result.Id);
+        Assert.Equal("Updated Title", result.Title.Value);
     }
 
     [Fact]
-    public async Task UpdateAsync_WithNonExistingId_ShouldReturnFalse()
+    public async Task UpdateAsync_WithNonExistingId_ShouldReturnNull()
     {
         using var context = _fixture.CreateContext();
         var repo = new Repository(context);
 
         var result = await repo.UpdateAsync(Guid.NewGuid(), "New Title", null, null, null, null, null, CancellationToken.None);
 
-        Assert.False(result);
+        Assert.Null(result);
     }
 
     [Fact]

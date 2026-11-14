@@ -1,10 +1,12 @@
+using CatalogAPI.Domain.Contexts.Games.Entities;
 using CatalogAPI.Domain.Contexts.Games.Enums;
 
 namespace CatalogAPI.Domain.Contexts.Games.Commands;
 
 public interface IUpdate
 {
-    Task<bool> UpdateAsync(
+    // Devolve o jogo atualizado, ou null se ele não existir.
+    Task<Game?> UpdateAsync(
         Guid id,
         string? title,
         string? description,
