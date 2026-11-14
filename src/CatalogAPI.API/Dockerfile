@@ -14,7 +14,7 @@ COPY . .
 WORKDIR "/source/src/CatalogAPI.API"
 RUN dotnet publish "CatalogAPI.API.csproj" -c Release -o /app/publish /p:UseAppHost=false
 
-FROM mcr.microsoft.com/dotnet/aspnet:10.0 AS final
+FROM mcr.microsoft.com/dotnet/aspnet:11.0 AS final
 WORKDIR /app
 EXPOSE 8080
 EXPOSE 8081
