@@ -9,7 +9,6 @@ using CatalogAPI.Infrastructure.Data;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Mvc.Testing;
 using Microsoft.EntityFrameworkCore;
-using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
 using Microsoft.Extensions.Hosting;
@@ -21,13 +20,12 @@ namespace CatalogAPI.API.Tests.Fixtures;
 
 public class ApiFactory : WebApplicationFactory<Program>, IAsyncLifetime
 {
-    // Same key the API uses to validate the JWT signature (mirrors UsersAPI's shared secret).
-    public const string TestSecretKey = "6a8a56f4d31a272d6e2f048f710c9cce45b51aa343fd6f73d8b69f1218eaac56";
+    // Throwaway signing key, only for tests: the real one (shared with UsersAPI) is never in the repo.
+    public const string TestSecretKey = "chave-somente-para-testes-de-integracao-0123456789abcdef";
 
     private readonly PostgreSqlContainer _container = new PostgreSqlBuilder("postgres:18")
         .WithDatabase("catalogdb_apitest")
         .WithUsername("postgres")
-        .WithPassword("pass")
         .Build();
 
     // The API keeps the real Redis cache, so tests get their own throwaway instance
@@ -52,14 +50,10 @@ public class ApiFactory : WebApplicationFactory<Program>, IAsyncLifetime
 
     protected override void ConfigureWebHost(IWebHostBuilder builder)
     {
-        builder.ConfigureAppConfiguration(config =>
-        {
-            // Pin the signing key so the API validates tokens minted by this factory.
-            config.AddInMemoryCollection(new Dictionary<string, string?>
-            {
-                ["JwtSettings:SecretKey"] = TestSecretKey
-            });
-        });
+        // Pin the signing key so the API validates tokens minted by this factory. UseSetting (not
+        // ConfigureAppConfiguration) because Program.cs reads the key while building, before late
+        // configuration sources are applied.
+        builder.UseSetting("JwtSettings:SecretKey", TestSecretKey);
 
         builder.ConfigureServices(services =>
         {

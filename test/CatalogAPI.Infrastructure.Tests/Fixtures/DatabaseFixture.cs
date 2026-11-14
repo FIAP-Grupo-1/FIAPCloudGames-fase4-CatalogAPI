@@ -9,7 +9,6 @@ public class DatabaseFixture : IAsyncLifetime
     private readonly PostgreSqlContainer _container = new PostgreSqlBuilder("postgres:18")
         .WithDatabase("catalogdb_test")
         .WithUsername("postgres")
-        .WithPassword("pass")
         .Build();
 
     public string ConnectionString { get; private set; } = string.Empty;

@@ -48,16 +48,24 @@ jobs:
       - name: Construindo imagem Docker
         run: docker build -f src/CatalogAPI.API/Dockerfile -t fcg-catalog-api:ci .
 
+      - name: Gerando senhas descartáveis (nenhuma fica no repositório)
+        run: |
+          pg=$(openssl rand -hex 16); mq=$(openssl rand -hex 16); jwt=$(openssl rand -hex 32)
+          echo "::add-mask::$pg"; echo "::add-mask::$mq"; echo "::add-mask::$jwt"
+          echo "PG_PASSWORD=$pg" >> "$GITHUB_ENV"
+          echo "RABBITMQ_PASSWORD=$mq" >> "$GITHUB_ENV"
+          echo "JWT_SECRET_KEY=$jwt" >> "$GITHUB_ENV"
+
       - name: Subindo dependências (PostgreSQL, Redis e RabbitMQ)
         run: |
           docker network create fcg
           docker run -d --name catalogdb --network fcg \
-            -e POSTGRES_DB=catalogdb -e POSTGRES_USER=postgres -e POSTGRES_PASSWORD=pass \
+            -e POSTGRES_DB=catalogdb -e POSTGRES_USER=postgres -e POSTGRES_PASSWORD="$PG_PASSWORD" \
             --health-cmd "pg_isready -U postgres -d catalogdb" --health-interval 2s --health-retries 30 \
             postgres:18
           docker run -d --name redis --network fcg redis:7-alpine
           docker run -d --name rabbitmq --network fcg \
-            -e RABBITMQ_DEFAULT_USER=guest -e RABBITMQ_DEFAULT_PASS=pass \
+            -e RABBITMQ_DEFAULT_USER=guest -e RABBITMQ_DEFAULT_PASS="$RABBITMQ_PASSWORD" \
             --health-cmd "rabbitmq-diagnostics -q check_running" --health-interval 5s --health-retries 24 \
             rabbitmq:4-management
           for i in $(seq 1 60); do
@@ -72,9 +80,11 @@ jobs:
       - name: Subindo a API
         run: |
           docker run -d --name api --network fcg -p 8080:8080 \
-            -e ConnectionStrings__DefaultConnection="Host=catalogdb;Port=5432;Database=catalogdb;Username=postgres;Password=pass" \
+            -e ConnectionStrings__DefaultConnection="Host=catalogdb;Port=5432;Database=catalogdb;Username=postgres;Password=$PG_PASSWORD" \
             -e ConnectionStrings__Redis="redis:6379,abortConnect=false" \
             -e RabbitMq__Host=rabbitmq \
+            -e RabbitMq__Password="$RABBITMQ_PASSWORD" \
+            -e JwtSettings__SecretKey="$JWT_SECRET_KEY" \
             fcg-catalog-api:ci
 
       - name: Smoke test (listagem de jogos)
