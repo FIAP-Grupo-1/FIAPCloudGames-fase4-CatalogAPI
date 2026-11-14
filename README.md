@@ -300,61 +300,179 @@ dotnet test test/CatalogAPI.API.Tests/
 
 ## Teste de carga (k6 + Grafana)
 
-O `performance/games.js` mede o impacto do cache em `GET /api/v1/games?page=1&pageSize=20`: faz uma
-requisição de aquecimento e depois sobe de 10 para 50 usuários virtuais em 90 s. O teste falha se mais de 1%
-das requisições der erro. As métricas vão para um InfluxDB e aparecem no Grafana
-(`docker-compose.monitoring.yml`).
+Este roteiro mede o ganho do cache Redis em `GET /api/v1/games?page=1&pageSize=20`: a mesma carga roda duas vezes,
+uma com o cache ligado e outra desligado, e o resultado aparece no resumo do k6 e no Grafana.
 
-| Variável | Padrão | Para quê |
+| Peça | Onde | O que faz |
 |---|---|---|
-| `BASE_URL` | `http://localhost:5140` | endereço da API (o perfil `http` do `dotnet run`) |
-| `CACHE_MODE` | `unknown` | etiqueta gravada em cada requisição (tag `cache`), para separar as execuções no Grafana |
+| `performance/seed-games.sh` | script bash | cadastra a massa de dados (padrão: 10.000 jogos) pela API |
+| `performance/games.js` | script k6 | aquecimento e rampa de 10 a 50 usuários virtuais em 90 s; falha se mais de 1% der erro |
+| `docker-compose.monitoring.yml` | Docker | InfluxDB 1.8 (guarda as métricas do k6) e Grafana (mostra os gráficos) |
+| `Cache__Enabled` | variável da API | liga (`true`) ou desliga (`false`) o cache de verdade (ver [Cache](#cache-redis)) |
+| `CACHE_MODE` | variável do k6 | **só uma etiqueta** (tag `cache`) gravada em cada medição, para o Grafana separar as execuções |
 
-### 1. Subir as dependências e o monitoramento
+> ⚠️ O `CACHE_MODE` não muda nada na API. Ele precisa **combinar** com o `Cache__Enabled` da API que está
+> rodando: `true` com `on`, `false` com `off`. Se não combinar, as duas linhas do Grafana se misturam.
+
+O k6 roda pela imagem oficial `grafana/k6` no Docker: não é preciso instalar nada além do Docker e do .NET SDK.
+Use **dois terminais**, os dois na raiz deste repositório: o **terminal 1** fica com a API e o **terminal 2**
+com os demais comandos.
+
+### 1. Subir as dependências e o monitoramento (terminal 2)
 
 ```bash
 docker compose up -d catalogdb redis rabbitmq
 dotnet ef database update --project src/CatalogAPI.Infrastructure --startup-project src/CatalogAPI.API
 
-export GRAFANA_ADMIN_PASSWORD='<escolha uma senha>'   # obrigatória; o compose recusa subir sem ela
+export GRAFANA_ADMIN_PASSWORD='<escolha uma senha>'
 docker compose -f docker-compose.monitoring.yml up -d
 ```
 
-O Grafana fica em `http://localhost:3000` (usuário `admin`), já com a fonte de dados `k6` apontando para o
-InfluxDB (`monitoring/grafana/provisioning/datasources/k6.yml`).
+O Grafana fica em `http://localhost:3000` (usuário `admin`, senha da variável acima), já com a fonte de dados
+`k6` apontando para o InfluxDB (`monitoring/grafana/provisioning/datasources/k6.yml`).
 
-> Com o catálogo vazio a consulta já é barata e a diferença aparece pouco. Cadastre alguns jogos antes
-> (`POST /api/v1/games`, ver [Endpoints](#endpoints)).
+> A `GRAFANA_ADMIN_PASSWORD` é exigida em **todo** comando com o `docker-compose.monitoring.yml`, não só no
+> `up`: sem ela até o `ps`, o `logs` e o `down` são recusados. Num terminal novo, exporte de novo (no `down`,
+> qualquer valor serve).
 
-### 2. Rodar com e sem cache
-
-A API roda fora do Docker para dar para trocar o `Cache__Enabled` entre as execuções. Em um terminal:
+### 2. Subir a API com cache (terminal 1)
 
 ```bash
-Cache__Enabled=true dotnet run --project src/CatalogAPI.API     # depois: Ctrl+C e repita com false
+Cache__Enabled=true dotnet run --project src/CatalogAPI.API
 ```
 
-Em outro terminal, com o [k6](https://grafana.com/docs/k6/latest/set-up/install-k6/) instalado:
+Espere `Now listening on: http://localhost:5140` e deixe o terminal aberto.
+
+### 3. Cadastrar a massa de dados (terminal 2, uma vez só)
 
 ```bash
-k6 run --out influxdb=http://localhost:8086/k6 -e CACHE_MODE=on  performance/games.js   # API com cache
-k6 run --out influxdb=http://localhost:8086/k6 -e CACHE_MODE=off performance/games.js   # API com Cache__Enabled=false
+performance/seed-games.sh
 ```
 
-Sem o k6 instalado, pelo Docker:
+O script cadastra **10.000 jogos** pela própria API (passando pela validação de domínio), 8 requisições por vez,
+e termina mostrando o total do catálogo. Leva cerca de 1 minuto. Configurável por variáveis:
 
 ```bash
-docker run --rm -i --network host -v "$PWD/performance:/scripts:ro" grafana/k6 \
+QTD=20000 PARALELO=16 performance/seed-games.sh            # mais jogos, mais requisições simultâneas
+BASE_URL=http://localhost:5001 performance/seed-games.sh   # API do docker compose
+```
+
+**Por que tantos jogos:** a listagem faz duas consultas no PostgreSQL a cada requisição, um `COUNT(*)` da tabela
+inteira e a página com `LIMIT 20`. A tabela `games` só tem índice na chave primária, então o `COUNT(*)` percorre
+todas as linhas: com poucos jogos ele é instantâneo e a diferença do cache quase não aparece; com milhares, o banco
+vira o gargalo sob carga. Com cache, as duas consultas saem do caminho.
+
+Para conferir o total:
+
+```bash
+curl -s "http://localhost:5140/api/v1/games?page=1&pageSize=1"    # campo "total"
+```
+
+### 4. Limpar medições anteriores (opcional, terminal 2)
+
+Recria o banco `k6` do InfluxDB, para o Grafana mostrar só as execuções novas:
+
+```bash
+curl -s -XPOST http://localhost:8086/query --data-urlencode "q=DROP DATABASE k6"
+curl -s -XPOST http://localhost:8086/query --data-urlencode "q=CREATE DATABASE k6"
+```
+
+### 5. Medição com cache (terminal 2)
+
+Com a API do passo 2 (`Cache__Enabled=true`) no ar:
+
+```bash
+docker exec catalogredis redis-cli --user catalog --pass pass --no-auth-warning INFO stats | grep keyspace_hits
+
+docker run --rm -i --network host -v "$PWD/performance:/scripts:ro" grafana/k6:2.4.0 \
   run --out influxdb=http://localhost:8086/k6 -e CACHE_MODE=on /scripts/games.js
+
+docker exec catalogredis redis-cli --user catalog --pass pass --no-auth-warning INFO stats | grep keyspace_hits
 ```
 
-### 3. Comparar
+- No topo da saída do k6, a linha `output:` precisa mostrar `InfluxDBv1 (http://localhost:8086)`. Se mostrar
+  `output: -`, a medição não foi gravada (faltou o `--out`).
+- O `keyspace_hits` (acertos de cache no Redis) precisa **subir** entre a primeira e a última leitura, mais ou
+  menos uma unidade por requisição do k6. É a prova de que as respostas vieram do Redis.
+- Anote do resumo final: `http_req_duration` (`avg` e `p(95)`) e `http_reqs` (requisições por segundo).
 
-- **No terminal:** o resumo do k6 mostra `http_req_duration` (média, `p(90)`, `p(95)`) e `http_reqs` (vazão).
-  Compare as duas execuções.
-- **No Grafana:** importe o dashboard **2587** (*k6 Load Testing Results*) em *Dashboards → New → Import*, com
-  a fonte de dados `k6`. Para separar as execuções, use o *Explore* com a fonte `k6` e agrupe
-  `http_req_duration` pela tag `cache`.
+### 6. Medição sem cache
+
+No **terminal 1**, pare a API com **Ctrl+C** e suba de novo com o cache desligado:
+
+```bash
+Cache__Enabled=false dotnet run --project src/CatalogAPI.API
+```
+
+No **terminal 2**, repita a medição com a etiqueta `off`:
+
+```bash
+docker exec catalogredis redis-cli --user catalog --pass pass --no-auth-warning INFO stats | grep keyspace_hits
+
+docker run --rm -i --network host -v "$PWD/performance:/scripts:ro" grafana/k6:2.4.0 \
+  run --out influxdb=http://localhost:8086/k6 -e CACHE_MODE=off /scripts/games.js
+
+docker exec catalogredis redis-cli --user catalog --pass pass --no-auth-warning INFO stats | grep keyspace_hits
+```
+
+Agora o `keyspace_hits` **não pode mudar**: com `Cache__Enabled=false` a API usa o `NoOpCacheService` e nem
+conecta no Redis, então toda requisição vai ao PostgreSQL. Se o número subiu, a API ainda está com cache: confira
+o comando do terminal 1.
+
+### 7. Comparar
+
+**No terminal**, compare os resumos dos passos 5 e 6. Referência medida numa máquina de desenvolvimento, com
+10.400 jogos e a API rodando local (os números variam com a máquina; a proporção é o que importa):
+
+| Métrica do k6 | Com cache | Sem cache | Ganho |
+|---|---|---|---|
+| `http_req_duration` `avg` | 4,24 ms | 20,81 ms | ~4,9× mais rápido |
+| `http_req_duration` `p(95)` | 9,84 ms | 43,79 ms | ~4,5× |
+| `http_reqs` (vazão) | 5.699 req/s | 1.177 req/s | ~4,8× |
+
+**No Grafana**, menu **Explore** → fonte de dados **k6** → período **Last 15 minutes** (ou o intervalo das duas
+execuções) → clique no lápis para escrever a consulta em texto → **Run query**:
+
+```sql
+-- Resumo lado a lado (troque a visualização para Table): média, p95 e total por modo
+SELECT mean("value") AS media_ms, percentile("value", 95) AS p95_ms, count("value") AS requisicoes
+FROM "http_req_duration" WHERE $timeFilter AND "cache" != '' GROUP BY "cache"
+
+-- Latência média ao longo do tempo, uma linha por modo
+SELECT mean("value") FROM "http_req_duration" WHERE $timeFilter AND "cache" != '' GROUP BY time(5s), "cache" fill(none)
+
+-- p95 ao longo do tempo
+SELECT percentile("value", 95) FROM "http_req_duration" WHERE $timeFilter AND "cache" != '' GROUP BY time(5s), "cache" fill(none)
+
+-- Vazão (requisições por segundo)
+SELECT count("value") / 5 FROM "http_reqs" WHERE $timeFilter AND "cache" != '' GROUP BY time(5s), "cache" fill(none)
+```
+
+Cole uma consulta por vez. O filtro `"cache" != ''` tira a requisição de aquecimento do script, que é gravada sem
+etiqueta. Como as execuções rodam uma depois da outra, nos gráficos de tempo as linhas `on` e `off` aparecem em
+sequência, não sobrepostas; o resumo em tabela é o que mostra os dois lado a lado.
+
+### Problemas comuns
+
+| Sintoma | Causa e solução |
+|---|---|
+| k6 mostra `output: -` e nada aparece no Grafana | faltou `--out influxdb=http://localhost:8086/k6` no comando |
+| Só uma linha (`on` ou `off`) no Grafana | uma das execuções rodou sem `--out`, ou o período do Grafana não cobre as duas |
+| Números com e sem cache quase iguais | a API não foi reiniciada com `Cache__Enabled=false` (o `keyspace_hits` subiu no passo 6), ou o catálogo tem poucos jogos |
+| `seed-games.sh`: "A API não respondeu" | a API do terminal 1 não está no ar (ou está em outra porta: use `BASE_URL`) |
+| Cadastro manual devolve `Release date cannot be in the past` | a API exige data de lançamento futura; o script já usa um ano à frente |
+| `dotnet ef database update` não conecta em `localhost:5432` | o container `catalogdb` foi criado sem a porta publicada: rode `docker compose up -d catalogdb` para recriá-lo (os dados ficam no volume) |
+| `docker compose -f docker-compose.monitoring.yml ...` recusa rodar | falta a `GRAFANA_ADMIN_PASSWORD` no terminal (ver passo 1) |
+| Docker Desktop (macOS/Windows): k6 não alcança a API | o `--network host` é do Linux; use `-e BASE_URL=http://host.docker.internal:5140` e `--out influxdb=http://host.docker.internal:8086/k6` |
+
+### Limpar depois
+
+```bash
+docker exec catalogdb psql -U postgres -d catalogdb -c "DELETE FROM games WHERE title LIKE 'Jogo de carga %'"
+GRAFANA_ADMIN_PASSWORD=x docker compose -f docker-compose.monitoring.yml down   # -v apaga também as métricas
+```
+
+Ao apagar jogos direto no banco, o cache não é invalidado: as listagens em cache expiram sozinhas em até 3 minutos.
 
 ---
 
