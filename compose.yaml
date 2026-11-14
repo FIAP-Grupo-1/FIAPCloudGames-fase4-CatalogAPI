@@ -33,6 +33,24 @@ services:
       timeout: 5s
       retries: 5
       
+  # Busca de jogos (GET /api/v1/games/search). Sem o plugin de segurança: só para
+  # desenvolvimento local. Na AWS é o Amazon OpenSearch com acesso por IAM.
+  opensearch:
+    image: opensearchproject/opensearch:2.19.1
+    container_name: catalogsearch
+    environment:
+      discovery.type: single-node
+      DISABLE_SECURITY_PLUGIN: "true"
+      DISABLE_INSTALL_DEMO_CONFIG: "true"
+      OPENSEARCH_JAVA_OPTS: -Xms512m -Xmx512m
+    ports:
+      - "9200:9200"
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fs http://localhost:9200/_cluster/health || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+
   catalogservice:
     build:
       context: .
@@ -52,12 +70,16 @@ services:
       - NEW_RELIC_DISTRIBUTED_TRACING_ENABLED=true
       - NEW_RELIC_APPLICATION_LOGGING_ENABLED=true
       - NEW_RELIC_APPLICATION_LOGGING_FORWARDING_ENABLED=true
+      - Search__Enabled=true
+      - Search__Endpoint=http://opensearch:9200
     depends_on:
       catalogdb:
         condition: service_healthy
       rabbitmq:
         condition: service_healthy
       redis:
+        condition: service_healthy
+      opensearch:
         condition: service_healthy
 
   rabbitmq:
@@ -74,27 +96,7 @@ services:
       interval: 5s
       timeout: 5s
       retries: 5
-    
-  elasticsearch:
-    image: docker.elastic.co/elasticsearch/elasticsearch:9.5.3
-    container_name: catalogelastic
-    environment:
-      - discovery.type=single-node
-      - xpack.security.enabled=true
-      - xpack.security.http.ssl.enabled=false   # só em dev, mantém http://
-      - ELASTIC_PASSWORD=catalog123
-      - ES_JAVA_OPTS=-Xms1g -Xmx1g
-    ports:
-      - "9200:9200"
-    volumes:
-      - esdata9:/usr/share/elasticsearch/data
-    healthcheck:
-      test: ["CMD-SHELL", "curl -s -u elastic:$${ELASTIC_PASSWORD} http://localhost:9200/_cluster/health | grep -qE '\"status\":\"(green|yellow)\"'"]
-      interval: 10s
-      timeout: 5s
-      retries: 20
 
 volumes:
   catalog_data:
   redis_data:
-  esdata9:

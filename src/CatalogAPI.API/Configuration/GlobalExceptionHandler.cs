@@ -1,4 +1,5 @@
 using System.Data.Common;
+using CatalogAPI.Application.Shared.Search;
 using CatalogAPI.Domain.Contexts.Games.Exceptions;
 using CatalogAPI.Domain.Contexts.Libraries.Exceptions;
 using CatalogAPI.Domain.Shared;
@@ -53,6 +54,8 @@ public sealed class GlobalExceptionHandler(ILogger<GlobalExceptionHandler> logge
 
         // Falhas de infraestrutura.
         DbException => (StatusCodes.Status500InternalServerError, "Erro ao acessar o banco de dados"),
+        // Busca desligada ou OpenSearch fora do ar: só o /search fica indisponível.
+        SearchUnavailableException => (StatusCodes.Status503ServiceUnavailable, "Busca indisponível"),
         _ => (StatusCodes.Status500InternalServerError, "Erro interno"),
     };
 }

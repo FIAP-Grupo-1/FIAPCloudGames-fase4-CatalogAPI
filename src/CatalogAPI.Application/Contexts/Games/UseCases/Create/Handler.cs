@@ -1,16 +1,13 @@
 using CatalogAPI.Application.Contexts.Games.UseCases.Create.DTOs;
-using CatalogAPI.Application.Contexts.Games.UseCases.Search.DTOs;
 using CatalogAPI.Application.Shared.Cache;
-using CatalogAPI.Application.Shared.ElasticSearch;
+using CatalogAPI.Application.Shared.Search;
 using CatalogAPI.Domain.Contexts.Games.Commands;
 using CatalogAPI.Domain.Contexts.Games.Entities;
-using Elastic.Clients.Elasticsearch;
 using MediatR;
-using Microsoft.Extensions.Logging;
 
 namespace CatalogAPI.Application.Contexts.Games.UseCases.Create;
 
-public class Handler(ICreate repository, ICacheService cacheService, IElasticSearchService elasticSearchService, ILogger<Handler> logger)
+public class Handler(ICreate repository, ICacheService cacheService, ISearchService searchService)
     : IRequestHandler<Request, Response>
 {
     public async Task<Response> Handle(Request request, CancellationToken cancellationToken)
@@ -33,15 +30,8 @@ public class Handler(ICreate repository, ICacheService cacheService, IElasticSea
         // O novo jogo precisa aparecer nas listagens já em cache.
         await cacheService.RemoveByPrefixAsync("games:all:", cancellationToken);
 
-
-        // Sincroniza o índice de busca. O banco é a fonte da verdade:
-        // falha aqui não pode desfazer nem derrubar a criação.
-        var indexed = await elasticSearchService.Create(
-            GameDocumentExtension.ToDocument(game),
-            "games",
-            game.Id.ToString(),
-            cancellationToken);
-
+        // Jogo novo entra no índice de busca na hora.
+        await searchService.IndexAsync(GameSearchDocument.From(game), cancellationToken);
 
         return new Response(
             "Game created",

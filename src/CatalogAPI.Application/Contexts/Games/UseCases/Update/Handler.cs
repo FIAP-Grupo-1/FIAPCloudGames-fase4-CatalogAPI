@@ -1,16 +1,13 @@
-using CatalogAPI.Application.Contexts.Games.UseCases.Create.DTOs;
-using CatalogAPI.Application.Contexts.Games.UseCases.Search.DTOs;
 using CatalogAPI.Application.Shared.Cache;
-using CatalogAPI.Application.Shared.ElasticSearch;
+using CatalogAPI.Application.Shared.Search;
 using CatalogAPI.Domain.Contexts.Games.Commands;
-using CatalogAPI.Domain.Contexts.Games.Entities;
 using CatalogAPI.Domain.Contexts.Games.Exceptions;
 using MediatR;
-using Microsoft.Extensions.Logging;
 
 namespace CatalogAPI.Application.Contexts.Games.UseCases.Update;
 
-public class Handler(IUpdate repository, ICacheService cacheService, IElasticSearchService elasticSearchService) : IRequestHandler<Request, Response>
+public class Handler(IUpdate repository, ICacheService cacheService, ISearchService searchService)
+    : IRequestHandler<Request, Response>
 {
     public async Task<Response> Handle(Request request, CancellationToken cancellationToken)
     {
@@ -20,6 +17,7 @@ public class Handler(IUpdate repository, ICacheService cacheService, IElasticSea
         if (!res.IsValid)
             return new Response("Invalid request", 400, res.Notifications);
 
+        // O repositório devolve o jogo já atualizado (null se não existir).
         var game = await repository
             .UpdateAsync(
                 request.Id,
@@ -36,16 +34,12 @@ public class Handler(IUpdate repository, ICacheService cacheService, IElasticSea
 
         await cacheService.RemoveAsync(cacheKey, cancellationToken);
 
-        var indexed = await elasticSearchService.Update(
-           GameDocumentExtension.ToDocument(game),
-           "games",
-           game.Id.ToString(),
-           cancellationToken);
-
-
         // Título, preço e gênero também aparecem nas listagens de jogos e nas bibliotecas.
         await cacheService.RemoveByPrefixAsync("games:all:", cancellationToken);
         await cacheService.RemoveByPrefixAsync("libraries:all:", cancellationToken);
+
+        // Reindexa com o estado salvo, para a busca refletir título, descrição, preço e status novos.
+        await searchService.IndexAsync(GameSearchDocument.From(game), cancellationToken);
 
         return new Response();
     }

@@ -1,20 +1,21 @@
+using Amazon;
 using CatalogAPI.Application.Shared.Cache;
-using CatalogAPI.Application.Shared.ElasticSearch;
+using CatalogAPI.Application.Shared.Search;
 using CatalogAPI.Domain.Contexts.Games.Commands;
 using CatalogAPI.Domain.Contexts.Games.Queries;
 using CatalogAPI.Infrastructure.Cache;
 using CatalogAPI.Infrastructure.Contexts.Games.UseCases.Create;
 using CatalogAPI.Infrastructure.Contexts.Libraries.Messaging;
 using CatalogAPI.Infrastructure.Data;
-using CatalogAPI.Infrastructure.ElasticSearch;
-using Elastic.Clients.Elasticsearch;
-using Elastic.Transport;
+using CatalogAPI.Infrastructure.Search;
 using FiapCloudGames.Contracts.Payments;
 using FiapCloudGames.RabbitMq.DependencyInjection;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
-using Microsoft.Extensions.Options;
+using OpenSearch.Client;
+using OpenSearch.Net;
+using OpenSearch.Net.Auth.AwsSigV4;
 using StackExchange.Redis;
 
 namespace CatalogAPI.Infrastructure.DependencyInjection;
@@ -63,8 +64,8 @@ public static class InfrastructureServiceExtension
         AddMessaging(services, configuration);
 
         AddRedis(services, configuration);
-        
-        AddElasticSearch(services, configuration);
+
+        AddSearch(services, configuration);
 
         return services;
     }
@@ -103,30 +104,39 @@ public static class InfrastructureServiceExtension
 
         services.AddSingleton<ICacheService, RedisCacheService>();
     }
-    private static void AddElasticSearch(IServiceCollection services, IConfiguration configuration)
+
+    // Busca de jogos no OpenSearch. Search:Enabled=false (padrão) usa o NoOpSearchService:
+    // o catálogo funciona sem motor de busca e só o /search responde 503.
+    private static void AddSearch(IServiceCollection services, IConfiguration configuration)
     {
-        services.Configure<ElasticSearchSettings>(
-        configuration.GetSection("ElasticSearch"));
+        var options = configuration.GetSection(SearchOptions.Section).Get<SearchOptions>() ?? new SearchOptions();
 
-        services.AddSingleton(sp =>
+        if (!options.Enabled)
         {
-            var options = sp.GetRequiredService<IOptions<ElasticSearchSettings>>().Value;
+            services.AddSingleton<ISearchService, NoOpSearchService>();
+            return;
+        }
 
-            var uri = configuration.GetConnectionString("ElasticSearch")
-                ?? throw new InvalidOperationException(
-                    "Defina a connection string 'ElasticSearch' (appsettings ou ConnectionStrings__ElasticSearch).");
+        if (string.IsNullOrWhiteSpace(options.Endpoint))
+            throw new InvalidOperationException("Search:Enabled=true exige Search:Endpoint.");
 
-            var settings = new ElasticsearchClientSettings(new Uri(uri));
+        services.AddSingleton<IOpenSearchClient>(_ =>
+        {
+            var pool = new SingleNodeConnectionPool(new Uri(options.Endpoint));
 
-            if (!string.IsNullOrWhiteSpace(options.Username))
-            {
-                settings.Authentication(
-                    new BasicAuthentication(options.Username, options.Password ?? string.Empty));
-            }
+            // Amazon OpenSearch com acesso por IAM: sem usuário/senha, cada requisição é
+            // assinada (SigV4) com a credencial da cadeia padrão do AWS SDK.
+            var settings = options.UseAwsSigV4
+                ? new ConnectionSettings(pool,
+                    new AwsSigV4HttpConnection(RegionEndpoint.GetBySystemName(options.Region)))
+                : new ConnectionSettings(pool);
 
-            return new ElasticsearchClient(settings);
+            settings.DefaultMappingFor<GameIndexDocument>(m => m.IndexName(OpenSearchService.IndexAlias));
+
+            return new OpenSearchClient(settings);
         });
 
-        services.AddSingleton<IElasticSearchService, ElasticSearchService>();
+        services.AddSingleton<ISearchService, OpenSearchService>();
+        services.AddHostedService<SearchIndexInitializer>();
     }
 }

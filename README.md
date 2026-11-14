@@ -10,10 +10,10 @@ API RESTful responsável pelo catálogo de jogos da plataforma FIAPCloudGames, d
 |---|---|
 | API | .NET 10, ASP.NET Core Minimal APIs, Swagger (Swashbuckle) |
 | Application | MediatR (CQRS), Flunt (notificações/validação) |
-| Infrastructure | Entity Framework Core 10, PostgreSQL 18 (Npgsql), Redis (StackExchange.Redis), FiapCloudGames.RabbitMq |
+| Infrastructure | Entity Framework Core 10, PostgreSQL 18 (Npgsql), Redis (StackExchange.Redis), OpenSearch (OpenSearch.Client + SigV4), FiapCloudGames.RabbitMq |
 | Domain | C# puro, sem dependências externas |
 | Testes | xUnit, NSubstitute, Testcontainers, coverlet, k6 (carga) |
-| Infraestrutura | Docker, Docker Compose, RabbitMQ 4, Redis 7, InfluxDB + Grafana (métricas do k6) |
+| Infraestrutura | Docker, Docker Compose, RabbitMQ 4, Redis 7, OpenSearch 2.19 (Amazon OpenSearch na AWS), InfluxDB + Grafana (métricas do k6) |
 
 ---
 
@@ -45,6 +45,7 @@ test/
 |---|---|---|
 | `POST` | `/` | Cria um novo jogo |
 | `GET` | `/` | Lista jogos com paginação |
+| `GET` | `/search?term=&genre=&minPrice=&maxPrice=&page=&size=` | Busca no OpenSearch: termo tolerante a erros de digitação e ordenado por relevância, com filtros de gênero e preço ([Busca](#busca-opensearch)) |
 | `GET` | `/{id}` | Busca jogo por ID |
 | `PUT` | `/{id}` | Atualiza dados de um jogo |
 | `DELETE` | `/{id}` | Remove um jogo |
@@ -184,6 +185,73 @@ A conexão vem de `ConnectionStrings:Redis` (no `compose.yaml`, `ConnectionStrin
 
 ---
 
+## Busca (OpenSearch)
+
+`GET /api/v1/games/search` busca no **OpenSearch**, sem consultar o Postgres. Precisa de pelo menos um
+critério:
+
+| Parâmetro | Uso |
+|---|---|
+| `term` | Texto livre em título e descrição. Tolera erros de digitação e define a relevância. Até 100 caracteres. |
+| `genre` | Filtro exato (`Action`, `RPG`, `Strategy`, `Sports`, `Puzzle`, `Other`) |
+| `minPrice` / `maxPrice` | Faixa de preço (mínimo ≤ máximo, sem negativos) |
+| `page` / `size` | Paginação (padrão 1 e 10; `size` até 50) |
+
+- **Fuzzy:** `multi_match` com `fuzziness: AUTO:4,7` aceita 1 erro em termos de 4 a 6 letras e 2 a partir
+  de 7 ("witchr" acha "The Witcher"). `prefix_length: 1` exige que a 1ª letra bata. O `AUTO` padrão daria
+  2 erros já com 6 letras, e "witchr" casaria com "with".
+- **Relevância:** o título pesa 3x a descrição, e o resultado vem ordenado pelo `score`, que vai em cada
+  item. Os filtros de gênero e preço só recortam o resultado, sem mexer no score. Sem `term`, a ordem é
+  alfabética.
+- Acentos e maiúsculas não importam ("pokemon" acha "Pokémon"). Jogos `Inactive` não aparecem.
+
+```bash
+curl "http://localhost:5140/api/v1/games/search?term=witchr"
+curl "http://localhost:5140/api/v1/games/search?term=witcher&maxPrice=10"
+curl "http://localhost:5140/api/v1/games/search?genre=RPG"
+```
+
+```json
+{ "data": {
+    "criteria": { "term": "witchr", "genre": null, "minPrice": null, "maxPrice": null },
+    "games": [
+      { "id": "…", "title": "The Witcher 3: Wild Hunt", "price": 99.9, "genre": "RPG", "score": 2.31 },
+      { "id": "…", "title": "Gwent: The Card Game", "price": 0, "genre": "Strategy", "score": 0.34 } ],
+    "page": 1, "pageSize": 10, "total": 2 },
+  "message": "Search completed", "statusCode": 200, "isSuccess": true }
+```
+
+O Gwent aparece porque tem "Witcher" na descrição, e fica abaixo porque o título pesa mais.
+
+### Como o índice acompanha o banco
+
+| Quando | O que acontece no índice `games` |
+|---|---|
+| Jogo criado (`POST`) | indexado na hora (`refresh=wait_for`: já aparece na próxima busca) |
+| Jogo editado (`PUT`) | reindexado com o estado salvo no banco |
+| Jogo excluído (`DELETE`) | removido |
+| API sobe | carga completa a partir do Postgres (`SearchIndexInitializer`) |
+
+O Postgres é a fonte da verdade. Se o OpenSearch estiver fora do ar numa escrita, o jogo é salvo do mesmo
+jeito e o erro vai para o log; a carga na subida corrige o índice. Essa carga monta um índice novo
+(`games-<timestamp>`) e troca o alias `games` de uma vez, então a busca não fica vazia durante um rolling
+update.
+
+### Configuração (`Search`)
+
+| Chave | Padrão | Uso |
+|---|---|---|
+| `Search:Enabled` | `false` | Liga a busca. Desligada, o catálogo funciona e o `/search` responde `503`. |
+| `Search:Endpoint` | — | `http://localhost:9200` (local) ou o endpoint `https://…es.amazonaws.com` |
+| `Search:UseAwsSigV4` | `false` | Amazon OpenSearch com acesso por IAM: assina as requisições com a credencial da cadeia padrão do AWS SDK (Pod Identity no EKS, `AWS_PROFILE` localmente). Sem senha. |
+| `Search:Region` | `us-east-1` | Região usada na assinatura |
+
+Rodando local: `docker compose up -d catalogdb redis rabbitmq opensearch` e a API com
+`Search__Enabled=true Search__Endpoint=http://localhost:9200`. Na AWS, o domínio e a role ficam no
+repositório Orchestration (`infra/cloudformation/opensearch.yaml`).
+
+---
+
 ## Domain
 
 ### Entidade `Game`
@@ -256,6 +324,8 @@ O tratamento de erros é **centralizado** num `IExceptionHandler` global
   exceções de domínio (`4xx`) expõem sua mensagem em `detail`.
 - Falhas de infraestrutura de banco (`DbException`) e quaisquer outras exceções não previstas viram
   `500`.
+- Busca desligada ou OpenSearch fora do ar (`SearchUnavailableException`) vira `503`: só o `/search`
+  fica indisponível.
 
 Isso mantém os handlers focados no fluxo de sucesso e garante respostas de erro consistentes em toda a API.
 

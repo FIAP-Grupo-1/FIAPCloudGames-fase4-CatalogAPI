@@ -1,5 +1,6 @@
 using CatalogAPI.Application.Contexts.Games.UseCases.Delete;
 using CatalogAPI.Application.Shared.Cache;
+using CatalogAPI.Application.Shared.Search;
 using CatalogAPI.Domain.Contexts.Games.Commands;
 using CatalogAPI.Domain.Contexts.Games.Exceptions;
 using CatalogAPI.Domain.Shared;
@@ -11,13 +12,15 @@ public class HandlerTests
 {
     private readonly IDelete _repository;
     private readonly ICacheService _cacheService;
+    private readonly ISearchService _searchService;
     private readonly Handler _handler;
 
     public HandlerTests()
     {
         _repository = Substitute.For<IDelete>();
         _cacheService = Substitute.For<ICacheService>();
-        _handler = new Handler(_repository, _cacheService);
+        _searchService = Substitute.For<ISearchService>();
+        _handler = new Handler(_repository, _cacheService, _searchService);
     }
 
     [Fact]
@@ -100,5 +103,27 @@ public class HandlerTests
 
         await Assert.ThrowsAsync<Exception>(
             () => _handler.Handle(new Request(Guid.NewGuid()), CancellationToken.None));
+    }
+
+    [Fact]
+    public async Task Handle_WithValidId_ShouldRemoveGameFromSearch()
+    {
+        var id = Guid.NewGuid();
+        _repository.DeleteAsync(id, Arg.Any<CancellationToken>()).Returns(Task.FromResult(true));
+
+        await _handler.Handle(new Request(id), CancellationToken.None);
+
+        await _searchService.Received(1).RemoveAsync(id, Arg.Any<CancellationToken>());
+    }
+
+    [Fact]
+    public async Task Handle_WhenGameNotFound_ShouldNotTouchSearch()
+    {
+        _repository.DeleteAsync(Arg.Any<Guid>(), Arg.Any<CancellationToken>()).Returns(Task.FromResult(false));
+
+        await Assert.ThrowsAsync<GameNotFoundException>(
+            () => _handler.Handle(new Request(Guid.NewGuid()), CancellationToken.None));
+
+        await _searchService.DidNotReceive().RemoveAsync(Arg.Any<Guid>(), Arg.Any<CancellationToken>());
     }
 }

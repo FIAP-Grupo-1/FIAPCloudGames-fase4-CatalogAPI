@@ -1,35 +1,30 @@
-﻿using CatalogAPI.Application.Contexts.Games.UseCases.Search.DTOs;
-using CatalogAPI.Application.Shared.ElasticSearch;
-using CatalogAPI.Domain.Contexts.Games.Entities;
+using CatalogAPI.Application.Contexts.Games.UseCases.Search.DTOs;
+using CatalogAPI.Application.Shared.Search;
 using MediatR;
 
+namespace CatalogAPI.Application.Contexts.Games.UseCases.Search;
 
-namespace CatalogAPI.Application.Contexts.Games.UseCases.Search
+// Busca no OpenSearch, independente do Postgres: o termo tolera erros de digitação (fuzzy)
+// e ordena por relevância; gênero e faixa de preço filtram sem mexer no score. Sem cache
+// de propósito: o resultado muda a cada jogo criado/editado e a busca já é a consulta rápida.
+public class Handler(ISearchService searchService) : IRequestHandler<Request, Response>
 {
-    public class Handler(IElasticSearchService elasticSearchService) : IRequestHandler<Request, Response>
+    public async Task<Response> Handle(Request request, CancellationToken cancellationToken)
     {
-        public async Task<Response> Handle(Request request, CancellationToken cancellationToken)
-        {
-            var res = Specification.Ensure(request);
-            if (!res.IsValid)
-                return new Response("Invalid request", 400, res.Notifications);
+        var res = Specification.Ensure(request);
+        if (!res.IsValid)
+            return new Response("Invalid request", 400, res.Notifications);
 
-            var criteria = new GameSearchCriteria(
-                request.Term,
-                request.Genre?.ToString(),
-                request.MinPrice,
-                request.MaxPrice);
+        var criteria = new GameSearchCriteria(
+            string.IsNullOrWhiteSpace(request.Term) ? null : request.Term.Trim(),
+            request.Genre,
+            request.MinPrice,
+            request.MaxPrice);
 
-            var games = await elasticSearchService.Search<GameDocument>(
-                criteria,
-                request.Page,
-                request.Size,
-                "games",
-                cancellationToken);
+        var result = await searchService.SearchAsync(criteria, request.Page, request.Size, cancellationToken);
 
-            return new Response(
-                "Search completed",
-                new SearchGameResponse(games, request.Page, request.Size));
-        }
+        return new Response(
+            "Search completed",
+            new PagedSearchResponse(criteria, result.Hits, request.Page, request.Size, result.Total));
     }
 }
