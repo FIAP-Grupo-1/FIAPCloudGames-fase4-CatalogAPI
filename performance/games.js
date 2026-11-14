@@ -18,6 +18,24 @@ export const options = {
         http_req_failed: ['rate<0.01'],
         checks: ['rate>0.99'],
     },
+    systemTags: [
+        'proto',
+        'subproto',
+        'status',
+        'method',
+        'url',
+        'name',
+        'group',
+        'check',
+        'error',
+        'error_code',
+        'tls_version',
+        'scenario',
+        'service',
+        'expected_response',
+        'vu',
+        'iter',
+    ],
 };
 
 export function setup() {

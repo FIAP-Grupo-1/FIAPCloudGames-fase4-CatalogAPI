@@ -1,14 +1,17 @@
 
 services:
-  influxdb:
-    image: influxdb:1.8
-    container_name: catalog-influxdb
+  prometheus:
+    image: prom/prometheus:latest
+    container_name: catalog-prometheus
     ports:
-      - "8086:8086"
-    environment:
-      INFLUXDB_DB: k6
+      - "9090:9090"
+    command:
+      - "--config.file=/etc/prometheus/prometheus.yml"
+      - "--web.enable-remote-write-receiver"
     volumes:
-      - influxdb_data:/var/lib/influxdb
+      - ./monitoring/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - prometheus_data:/prometheus
+    restart: unless-stopped
 
   grafana:
     image: grafana/grafana:latest
@@ -22,8 +25,9 @@ services:
       - grafana_data:/var/lib/grafana
       - ./monitoring/grafana/provisioning/datasources:/etc/grafana/provisioning/datasources:ro
     depends_on:
-      - influxdb
+      - prometheus
+    restart: unless-stopped
 
 volumes:
-  influxdb_data:
+  prometheus_data:
   grafana_data:
