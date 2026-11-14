@@ -22,6 +22,7 @@ builder.Services.AddSwaggerConfig();
 var app = builder.Build();
 
 await app.MigrateAsync();
+await app.SeedElasticSearchAsync();
 
 app.UseExceptionHandler();
 
