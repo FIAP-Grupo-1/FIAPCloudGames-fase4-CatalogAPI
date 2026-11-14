@@ -33,7 +33,7 @@ public class Handler(IGetById repository, ICacheService cacheService) : IRequest
                     game.Status,
                     game.ReleaseDate);
             },
-            TimeSpan.FromMinutes(20),
+            CacheExpiration.GameDetails,
             cancellationToken
         );
 

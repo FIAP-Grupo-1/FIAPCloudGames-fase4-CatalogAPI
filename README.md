@@ -10,10 +10,10 @@ API RESTful responsável pelo catálogo de jogos da plataforma FIAPCloudGames, d
 |---|---|
 | API | .NET 10, ASP.NET Core Minimal APIs, Swagger (Swashbuckle) |
 | Application | MediatR (CQRS), Flunt (notificações/validação) |
-| Infrastructure | Entity Framework Core 10, PostgreSQL 18 (Npgsql), FiapCloudGames.RabbitMq |
+| Infrastructure | Entity Framework Core 10, PostgreSQL 18 (Npgsql), Redis (StackExchange.Redis), FiapCloudGames.RabbitMq |
 | Domain | C# puro, sem dependências externas |
-| Testes | xUnit, NSubstitute, Testcontainers, coverlet |
-| Infraestrutura | Docker, Docker Compose, RabbitMQ 4 |
+| Testes | xUnit, NSubstitute, Testcontainers, coverlet, k6 (carga) |
+| Infraestrutura | Docker, Docker Compose, RabbitMQ 4, Redis 7, InfluxDB + Grafana (métricas do k6) |
 
 ---
 
@@ -143,6 +143,47 @@ new JsonSerializerOptions(JsonSerializerDefaults.Web)
 
 ---
 
+## Cache (Redis)
+
+As consultas mais frequentes passam por um cache distribuído no Redis (`ICacheService`, implementado por
+`RedisCacheService` com StackExchange.Redis). Na primeira consulta o resultado vem do PostgreSQL e é gravado
+no Redis em JSON; até expirar, as próximas consultas iguais são respondidas pelo Redis, sem ir ao banco.
+
+| Consulta | Chave no Redis | Expira em |
+|---|---|---|
+| `GET /api/v1/games` (listagem paginada) | `games:all:page={page}:size={pageSize}` | 3 min |
+| `GET /api/v1/games/{id}` | `games:{id}` | 20 min |
+| `GET /api/v1/library` (biblioteca do usuário) | `libraries:all:userId={userId}:page={page}:size={pageSize}` | 3 min |
+
+Os tempos ficam centralizados em `CatalogAPI.Application/Shared/Cache/CacheExpiration.cs`.
+
+**Invalidação:** o cache não espera expirar quando o dado muda.
+
+| Quando | O que é removido |
+|---|---|
+| Jogo criado | todas as páginas da listagem (`games:all:*`) |
+| Jogo editado ou removido | o detalhe do jogo (`games:{id}`), a listagem (`games:all:*`) e as bibliotecas (`libraries:all:*`) |
+| Pagamento aprovado (`PaymentProcessed`) | as páginas da biblioteca daquele usuário (`libraries:all:userId={userId}:*`) |
+
+A remoção por prefixo usa `SCAN` (`KeysAsync`), que não bloqueia o Redis como o `KEYS`.
+
+### Ligar e desligar o cache (`Cache:Enabled`)
+
+```json
+"Cache": {
+  "Enabled": true
+}
+```
+
+Com `false` (ou a variável de ambiente `Cache__Enabled=false`), a API registra o `NoOpCacheService`: toda
+consulta vai direto ao PostgreSQL e a API **nem conecta no Redis**. Serve para medir o ganho do cache com o
+teste de carga (ver [Teste de carga](#teste-de-carga-k6--grafana)). O padrão é `true`.
+
+A conexão vem de `ConnectionStrings:Redis` (no `compose.yaml`, `ConnectionStrings__Redis`), com o usuário
+`catalog` criado pelo próprio container do Redis.
+
+---
+
 ## Domain
 
 ### Entidade `Game`
@@ -257,6 +298,184 @@ dotnet test test/CatalogAPI.API.Tests/
 
 ---
 
+## Teste de carga (k6 + Grafana)
+
+Este roteiro mede o ganho do cache Redis em `GET /api/v1/games?page=1&pageSize=20`: a mesma carga roda duas vezes,
+uma com o cache ligado e outra desligado, e o resultado aparece no resumo do k6 e no Grafana.
+
+| Peça | Onde | O que faz |
+|---|---|---|
+| `performance/seed-games.sh` | script bash | cadastra a massa de dados (padrão: 10.000 jogos) pela API |
+| `performance/games.js` | script k6 | aquecimento e rampa de 10 a 50 usuários virtuais em 90 s; falha se mais de 1% der erro |
+| `docker-compose.monitoring.yml` | Docker | InfluxDB 1.8 (guarda as métricas do k6) e Grafana (mostra os gráficos) |
+| `Cache__Enabled` | variável da API | liga (`true`) ou desliga (`false`) o cache de verdade (ver [Cache](#cache-redis)) |
+| `CACHE_MODE` | variável do k6 | **só uma etiqueta** (tag `cache`) gravada em cada medição, para o Grafana separar as execuções |
+
+> ⚠️ O `CACHE_MODE` não muda nada na API. Ele precisa **combinar** com o `Cache__Enabled` da API que está
+> rodando: `true` com `on`, `false` com `off`. Se não combinar, as duas linhas do Grafana se misturam.
+
+O k6 roda pela imagem oficial `grafana/k6` no Docker: não é preciso instalar nada além do Docker e do .NET SDK.
+Use **dois terminais**, os dois na raiz deste repositório: o **terminal 1** fica com a API e o **terminal 2**
+com os demais comandos.
+
+### 1. Subir as dependências e o monitoramento (terminal 2)
+
+```bash
+docker compose up -d catalogdb redis rabbitmq
+dotnet ef database update --project src/CatalogAPI.Infrastructure --startup-project src/CatalogAPI.API
+
+export GRAFANA_ADMIN_PASSWORD='<escolha uma senha>'
+docker compose -f docker-compose.monitoring.yml up -d
+```
+
+O Grafana fica em `http://localhost:3000` (usuário `admin`, senha da variável acima), já com a fonte de dados
+`k6` apontando para o InfluxDB (`monitoring/grafana/provisioning/datasources/k6.yml`).
+
+> A `GRAFANA_ADMIN_PASSWORD` é exigida em **todo** comando com o `docker-compose.monitoring.yml`, não só no
+> `up`: sem ela até o `ps`, o `logs` e o `down` são recusados. Num terminal novo, exporte de novo (no `down`,
+> qualquer valor serve).
+
+### 2. Subir a API com cache (terminal 1)
+
+```bash
+Cache__Enabled=true dotnet run --project src/CatalogAPI.API
+```
+
+Espere `Now listening on: http://localhost:5140` e deixe o terminal aberto.
+
+### 3. Cadastrar a massa de dados (terminal 2, uma vez só)
+
+```bash
+performance/seed-games.sh
+```
+
+O script cadastra **10.000 jogos** pela própria API (passando pela validação de domínio), 8 requisições por vez,
+e termina mostrando o total do catálogo. Leva cerca de 1 minuto. Configurável por variáveis:
+
+```bash
+QTD=20000 PARALELO=16 performance/seed-games.sh            # mais jogos, mais requisições simultâneas
+BASE_URL=http://localhost:5001 performance/seed-games.sh   # API do docker compose
+```
+
+**Por que tantos jogos:** a listagem faz duas consultas no PostgreSQL a cada requisição, um `COUNT(*)` da tabela
+inteira e a página com `LIMIT 20`. A tabela `games` só tem índice na chave primária, então o `COUNT(*)` percorre
+todas as linhas: com poucos jogos ele é instantâneo e a diferença do cache quase não aparece; com milhares, o banco
+vira o gargalo sob carga. Com cache, as duas consultas saem do caminho.
+
+Para conferir o total:
+
+```bash
+curl -s "http://localhost:5140/api/v1/games?page=1&pageSize=1"    # campo "total"
+```
+
+### 4. Limpar medições anteriores (opcional, terminal 2)
+
+Recria o banco `k6` do InfluxDB, para o Grafana mostrar só as execuções novas:
+
+```bash
+curl -s -XPOST http://localhost:8086/query --data-urlencode "q=DROP DATABASE k6"
+curl -s -XPOST http://localhost:8086/query --data-urlencode "q=CREATE DATABASE k6"
+```
+
+### 5. Medição com cache (terminal 2)
+
+Com a API do passo 2 (`Cache__Enabled=true`) no ar:
+
+```bash
+docker exec catalogredis redis-cli --user catalog --pass pass --no-auth-warning INFO stats | grep keyspace_hits
+
+docker run --rm -i --network host -v "$PWD/performance:/scripts:ro" grafana/k6:2.4.0 \
+  run --out influxdb=http://localhost:8086/k6 -e CACHE_MODE=on /scripts/games.js
+
+docker exec catalogredis redis-cli --user catalog --pass pass --no-auth-warning INFO stats | grep keyspace_hits
+```
+
+- No topo da saída do k6, a linha `output:` precisa mostrar `InfluxDBv1 (http://localhost:8086)`. Se mostrar
+  `output: -`, a medição não foi gravada (faltou o `--out`).
+- O `keyspace_hits` (acertos de cache no Redis) precisa **subir** entre a primeira e a última leitura, mais ou
+  menos uma unidade por requisição do k6. É a prova de que as respostas vieram do Redis.
+- Anote do resumo final: `http_req_duration` (`avg` e `p(95)`) e `http_reqs` (requisições por segundo).
+
+### 6. Medição sem cache
+
+No **terminal 1**, pare a API com **Ctrl+C** e suba de novo com o cache desligado:
+
+```bash
+Cache__Enabled=false dotnet run --project src/CatalogAPI.API
+```
+
+No **terminal 2**, repita a medição com a etiqueta `off`:
+
+```bash
+docker exec catalogredis redis-cli --user catalog --pass pass --no-auth-warning INFO stats | grep keyspace_hits
+
+docker run --rm -i --network host -v "$PWD/performance:/scripts:ro" grafana/k6:2.4.0 \
+  run --out influxdb=http://localhost:8086/k6 -e CACHE_MODE=off /scripts/games.js
+
+docker exec catalogredis redis-cli --user catalog --pass pass --no-auth-warning INFO stats | grep keyspace_hits
+```
+
+Agora o `keyspace_hits` **não pode mudar**: com `Cache__Enabled=false` a API usa o `NoOpCacheService` e nem
+conecta no Redis, então toda requisição vai ao PostgreSQL. Se o número subiu, a API ainda está com cache: confira
+o comando do terminal 1.
+
+### 7. Comparar
+
+**No terminal**, compare os resumos dos passos 5 e 6. Referência medida numa máquina de desenvolvimento, com
+10.400 jogos e a API rodando local (os números variam com a máquina; a proporção é o que importa):
+
+| Métrica do k6 | Com cache | Sem cache | Ganho |
+|---|---|---|---|
+| `http_req_duration` `avg` | 4,24 ms | 20,81 ms | ~4,9× mais rápido |
+| `http_req_duration` `p(95)` | 9,84 ms | 43,79 ms | ~4,5× |
+| `http_reqs` (vazão) | 5.699 req/s | 1.177 req/s | ~4,8× |
+
+**No Grafana**, menu **Explore** → fonte de dados **k6** → período **Last 15 minutes** (ou o intervalo das duas
+execuções) → clique no lápis para escrever a consulta em texto → **Run query**:
+
+```sql
+-- Resumo lado a lado (troque a visualização para Table): média, p95 e total por modo
+SELECT mean("value") AS media_ms, percentile("value", 95) AS p95_ms, count("value") AS requisicoes
+FROM "http_req_duration" WHERE $timeFilter AND "cache" != '' GROUP BY "cache"
+
+-- Latência média ao longo do tempo, uma linha por modo
+SELECT mean("value") FROM "http_req_duration" WHERE $timeFilter AND "cache" != '' GROUP BY time(5s), "cache" fill(none)
+
+-- p95 ao longo do tempo
+SELECT percentile("value", 95) FROM "http_req_duration" WHERE $timeFilter AND "cache" != '' GROUP BY time(5s), "cache" fill(none)
+
+-- Vazão (requisições por segundo)
+SELECT count("value") / 5 FROM "http_reqs" WHERE $timeFilter AND "cache" != '' GROUP BY time(5s), "cache" fill(none)
+```
+
+Cole uma consulta por vez. O filtro `"cache" != ''` tira a requisição de aquecimento do script, que é gravada sem
+etiqueta. Como as execuções rodam uma depois da outra, nos gráficos de tempo as linhas `on` e `off` aparecem em
+sequência, não sobrepostas; o resumo em tabela é o que mostra os dois lado a lado.
+
+### Problemas comuns
+
+| Sintoma | Causa e solução |
+|---|---|
+| k6 mostra `output: -` e nada aparece no Grafana | faltou `--out influxdb=http://localhost:8086/k6` no comando |
+| Só uma linha (`on` ou `off`) no Grafana | uma das execuções rodou sem `--out`, ou o período do Grafana não cobre as duas |
+| Números com e sem cache quase iguais | a API não foi reiniciada com `Cache__Enabled=false` (o `keyspace_hits` subiu no passo 6), ou o catálogo tem poucos jogos |
+| `seed-games.sh`: "A API não respondeu" | a API do terminal 1 não está no ar (ou está em outra porta: use `BASE_URL`) |
+| Cadastro manual devolve `Release date cannot be in the past` | a API exige data de lançamento futura; o script já usa um ano à frente |
+| `dotnet ef database update` não conecta em `localhost:5432` | o container `catalogdb` foi criado sem a porta publicada: rode `docker compose up -d catalogdb` para recriá-lo (os dados ficam no volume) |
+| `docker compose -f docker-compose.monitoring.yml ...` recusa rodar | falta a `GRAFANA_ADMIN_PASSWORD` no terminal (ver passo 1) |
+| Docker Desktop (macOS/Windows): k6 não alcança a API | o `--network host` é do Linux; use `-e BASE_URL=http://host.docker.internal:5140` e `--out influxdb=http://host.docker.internal:8086/k6` |
+
+### Limpar depois
+
+```bash
+docker exec catalogdb psql -U postgres -d catalogdb -c "DELETE FROM games WHERE title LIKE 'Jogo de carga %'"
+GRAFANA_ADMIN_PASSWORD=x docker compose -f docker-compose.monitoring.yml down   # -v apaga também as métricas
+```
+
+Ao apagar jogos direto no banco, o cache não é invalidado: as listagens em cache expiram sozinhas em até 3 minutos.
+
+---
+
 ## CI
 
 O workflow `.github/workflows/test.yml` roda em todo pull request:
@@ -266,7 +485,30 @@ O workflow `.github/workflows/test.yml` roda em todo pull request:
 | `test` | Faz restore e build em Release e roda os testes unitários (`Domain`, `Application`) e de integração (`Infrastructure`, `API`). PostgreSQL e Redis dos testes vêm do Testcontainers. |
 | `container-test` | Roda só se o `test` passar (`needs: test`). Faz o build da imagem pelo `src/CatalogAPI.API/Dockerfile`, sobe PostgreSQL, Redis, RabbitMQ e a API numa rede Docker e faz um smoke test em `GET /api/v1/games` (espera HTTP 200). Os logs da API são exibidos sempre. |
 
-O build e o push da imagem no ECR ficam no `ecr-push.yml`.
+### Deploy contínuo
+
+Depois do merge, a entrega fica no `.github/workflows/ecr-push.yml`: todo push na `main` passa pelos testes,
+publica a imagem no ECR e atualiza o `catalog-api` no EKS por rolling update, sem derrubar o serviço.
+
+| Job | Quando roda | O que faz |
+|---|---|---|
+| `Build (PR)` | pull request | só builda a imagem, sem tocar na AWS |
+| `Build e testes unitários` | push na `main` ou tag `v*` | restore, build em Release e testes de `Domain` e `Application`. Se falhar, nada é publicado |
+| `Build e push no ECR` | depois dos testes | publica `fcg/catalog-api:sha-<commit>` (na `main`) ou `fcg/catalog-api:v*` (na tag) |
+| `Deploy no EKS` | depois do push | `kubectl set image` no deployment `catalog-api` do namespace `fcg` e espera o `rollout status` (até 5 min) |
+
+- **Tags:** `sha-*` expira em 15 dias pela lifecycle do ECR; `v*` nunca expira. Para uma release:
+  `git tag v1.2.3 && git push origin v1.2.3`. As tags do ECR são imutáveis, então uma tag já publicada não é
+  sobrescrita (o push é pulado e o deploy usa a imagem existente).
+- **Zero downtime:** o deployment usa `RollingUpdate` com `maxUnavailable: 0`. O pod novo só recebe tráfego
+  depois da readiness probe; se ele não ficar pronto, os antigos continuam atendendo e o job falha.
+- **Cluster desligado:** o cluster EKS é efêmero. Sem ele, o job avisa (*"Cluster fcg desligado; deploy
+  pulado"*) e termina verde; a imagem entra no próximo `make workloads-deploy` do Orchestration.
+- **Credenciais:** OIDC com a role `fcg-gha-catalog-api` (variável de repositório `AWS_ROLE_ARN`), sem access
+  key no GitHub. A role publica só no `fcg/catalog-api` e, no cluster, edita só o namespace `fcg`
+  (`github-oidc.yaml` e `eks.yaml` do Orchestration).
+- **Refazer um deploy sem mudar código:** na aba Actions, abra a execução do `ecr-push` do commit desejado e
+  use *Re-run all jobs*.
 
 ### Lint
 
@@ -357,12 +599,13 @@ docker compose up -d --build
 dotnet ef database update --project src/CatalogAPI.Infrastructure --startup-project src/CatalogAPI.API
 ```
 
-Isso sobe três serviços:
+Isso sobe quatro serviços:
 
 | Serviço | Porta (host:container) |
 |---|---|
 | CatalogAPI | `5001:8080` |
 | PostgreSQL 18 | `5432:5432` |
+| Redis 7 (cache) | `6379:6379` |
 | RabbitMQ 4 | `5672:5672` / `15672:15672` (management) |
 
 A API ficará disponível em `http://localhost:5001`. O container roda com
