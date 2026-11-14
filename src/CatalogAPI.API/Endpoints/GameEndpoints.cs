@@ -1,5 +1,6 @@
 using CatalogAPI.Application.Contexts.Games.UseCases.Create;
 using CatalogAPI.Application.Contexts.Games.UseCases.Update.DTOs;
+using CatalogAPI.Domain.Contexts.Games.Enums;
 using MediatR;
 using Microsoft.AspNetCore.Mvc;
 
@@ -26,6 +27,9 @@ public static class GameEndpoints
 
         group.MapPut("/{id:guid}", UpdateAsync)
             .WithName("UpdateGame");
+
+        group.MapGet("/search", SearchAsync)
+            .WithName("SearchGames");
     }
 
     private static async Task<IResult> CreateAsync(
@@ -103,5 +107,31 @@ public static class GameEndpoints
             return Results.Json(response, statusCode: response.StatusCode);
 
         return Results.NoContent();
+    }
+
+    private static async Task<IResult> SearchAsync(
+    [FromQuery] string? term,
+    [FromQuery] GameGenre? genre,
+    [FromQuery] decimal? minPrice,
+    [FromQuery] decimal? maxPrice,
+    [FromQuery] int? page,
+    [FromQuery] int? size,
+    ISender sender,
+    CancellationToken cancellationToken)
+    {
+        var request = new Application.Contexts.Games.UseCases.Search.Request(
+            term,
+            genre,
+            minPrice,
+            maxPrice,
+            page ?? 1,
+            size ?? 10);
+
+        var response = await sender.Send(request, cancellationToken);
+
+        if (!response.IsSuccess)
+            return Results.Json(response, statusCode: response.StatusCode);
+
+        return Results.Ok(response);
     }
 }

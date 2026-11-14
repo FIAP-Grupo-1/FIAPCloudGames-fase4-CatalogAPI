@@ -1,11 +1,12 @@
 using CatalogAPI.Application.Shared.Cache;
+using CatalogAPI.Application.Shared.ElasticSearch;
 using CatalogAPI.Domain.Contexts.Games.Commands;
 using CatalogAPI.Domain.Contexts.Games.Exceptions;
 using MediatR;
 
 namespace CatalogAPI.Application.Contexts.Games.UseCases.Delete;
 
-public class Handler(IDelete repository, ICacheService cacheService) : IRequestHandler<Request, Response>
+public class Handler(IDelete repository, ICacheService cacheService, IElasticSearchService elasticSearchService) : IRequestHandler<Request, Response>
 {
     public async Task<Response> Handle(Request request, CancellationToken cancellationToken)
     {
@@ -25,6 +26,11 @@ public class Handler(IDelete repository, ICacheService cacheService) : IRequestH
         // O jogo removido não pode continuar nas listagens de jogos nem nas bibliotecas.
         await cacheService.RemoveByPrefixAsync("games:all:", cancellationToken);
         await cacheService.RemoveByPrefixAsync("libraries:all:", cancellationToken);
+
+        await elasticSearchService.Delete(
+            request.Id.ToString(),
+            "games",
+            cancellationToken);
 
         return new Response();
     }

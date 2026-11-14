@@ -1,9 +1,12 @@
 using CatalogAPI.Application.Contexts.Games.UseCases.Update;
 using CatalogAPI.Application.Shared.Cache;
+using CatalogAPI.Application.Shared.ElasticSearch;
 using CatalogAPI.Domain.Contexts.Games.Commands;
+using CatalogAPI.Domain.Contexts.Games.Entities;
 using CatalogAPI.Domain.Contexts.Games.Enums;
 using CatalogAPI.Domain.Contexts.Games.Exceptions;
 using CatalogAPI.Domain.Shared;
+using Microsoft.Extensions.Logging;
 using NSubstitute;
 
 namespace CatalogAPI.Application.Tests.Games.UseCases.Update;
@@ -12,6 +15,7 @@ public class HandlerTests
 {
     private readonly IUpdate _repository;
     private readonly ICacheService _cacheService;
+    private readonly IElasticSearchService _elasticSearchService;
     private readonly Handler _handler;
     private static readonly DateOnly Tomorrow = DateOnly.FromDateTime(DateTime.UtcNow.AddDays(1));
 
@@ -19,7 +23,8 @@ public class HandlerTests
     {
         _repository = Substitute.For<IUpdate>();
         _cacheService = Substitute.For<ICacheService>();
-        _handler = new Handler(_repository, _cacheService);
+        _elasticSearchService = Substitute.For<IElasticSearchService>();
+        _handler = new Handler(_repository, _cacheService, _elasticSearchService);
     }
 
     private static Request ValidRequest(Guid? id = null) =>
@@ -30,10 +35,11 @@ public class HandlerTests
     {
         var request = ValidRequest();
 
-        _repository.UpdateAsync(
+        var result = await _repository.UpdateAsync(
                 request.Id, request.Title, request.Description, request.Price,
-                request.Genre, request.Status, request.ReleaseDate, Arg.Any<CancellationToken>())
-            .Returns(Task.FromResult(true));
+                request.Genre, request.Status, request.ReleaseDate, Arg.Any<CancellationToken>());
+
+        Assert.NotNull(result);
 
         await _handler.Handle(request, CancellationToken.None);
 
@@ -48,7 +54,7 @@ public class HandlerTests
         _repository.UpdateAsync(
                 Arg.Any<Guid>(), Arg.Any<string?>(), Arg.Any<string?>(), Arg.Any<decimal?>(),
                 Arg.Any<GameGenre?>(), Arg.Any<GameStatus?>(), Arg.Any<DateOnly?>(), Arg.Any<CancellationToken>())
-            .Returns(Task.FromResult(false));
+            .Returns(Task.FromResult((Game?)null));
 
         await Assert.ThrowsAsync<GameNotFoundException>(() => _handler.Handle(ValidRequest(), CancellationToken.None));
 
@@ -60,10 +66,11 @@ public class HandlerTests
     {
         var request = ValidRequest();
 
-        _repository.UpdateAsync(
+        var result = await _repository.UpdateAsync(
                 request.Id, request.Title, request.Description, request.Price,
-                request.Genre, request.Status, request.ReleaseDate, Arg.Any<CancellationToken>())
-            .Returns(Task.FromResult(true));
+                request.Genre, request.Status, request.ReleaseDate, Arg.Any<CancellationToken>());
+
+        Assert.NotNull(result);
 
         var response = await _handler.Handle(request, CancellationToken.None);
 
@@ -79,7 +86,7 @@ public class HandlerTests
         _repository.UpdateAsync(
                 Arg.Any<Guid>(), Arg.Any<string?>(), Arg.Any<string?>(), Arg.Any<decimal?>(),
                 Arg.Any<GameGenre?>(), Arg.Any<GameStatus?>(), Arg.Any<DateOnly?>(), Arg.Any<CancellationToken>())
-            .Returns(Task.FromResult(false));
+            .Returns(Task.FromResult((Game?)null));
 
         // GlobalExceptionHandler mapeia GameNotFoundException -> 404.
         await Assert.ThrowsAsync<GameNotFoundException>(() => _handler.Handle(request, CancellationToken.None));
@@ -107,7 +114,7 @@ public class HandlerTests
         _repository.UpdateAsync(
                 Arg.Any<Guid>(), Arg.Any<string?>(), Arg.Any<string?>(), Arg.Any<decimal?>(),
                 Arg.Any<GameGenre?>(), Arg.Any<GameStatus?>(), Arg.Any<DateOnly?>(), Arg.Any<CancellationToken>())
-            .Returns(Task.FromException<bool>(new DomainException("Domain rule violated")));
+            .Returns(Task.FromException<Game?>(new DomainException("Domain rule violated")));
 
         await Assert.ThrowsAsync<DomainException>(() => _handler.Handle(request, CancellationToken.None));
     }
@@ -120,7 +127,7 @@ public class HandlerTests
         _repository.UpdateAsync(
                 Arg.Any<Guid>(), Arg.Any<string?>(), Arg.Any<string?>(), Arg.Any<decimal?>(),
                 Arg.Any<GameGenre?>(), Arg.Any<GameStatus?>(), Arg.Any<DateOnly?>(), Arg.Any<CancellationToken>())
-            .Returns(Task.FromException<bool>(new Exception("Unexpected error")));
+            .Returns(Task.FromException<Game?>(new Exception("Unexpected error")));
 
         await Assert.ThrowsAsync<Exception>(() => _handler.Handle(request, CancellationToken.None));
     }
