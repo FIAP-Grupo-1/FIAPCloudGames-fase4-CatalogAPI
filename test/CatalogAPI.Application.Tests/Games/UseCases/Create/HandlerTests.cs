@@ -1,5 +1,6 @@
 using CatalogAPI.Application.Contexts.Games.UseCases.Create;
 using CatalogAPI.Application.Shared.Cache;
+using CatalogAPI.Application.Shared.Search;
 using CatalogAPI.Domain.Contexts.Games.Commands;
 using CatalogAPI.Domain.Contexts.Games.Entities;
 using CatalogAPI.Domain.Contexts.Games.Enums;
@@ -12,6 +13,7 @@ public class HandlerTests
 {
     private readonly ICreate _repository;
     private readonly ICacheService _cacheService;
+    private readonly ISearchService _searchService;
     private readonly Handler _handler;
     private static readonly DateOnly Tomorrow = DateOnly.FromDateTime(DateTime.UtcNow.AddDays(1));
 
@@ -19,7 +21,8 @@ public class HandlerTests
     {
         _repository = Substitute.For<ICreate>();
         _cacheService = Substitute.For<ICacheService>();
-        _handler = new Handler(_repository, _cacheService);
+        _searchService = Substitute.For<ISearchService>();
+        _handler = new Handler(_repository, _cacheService, _searchService);
     }
 
     [Fact]
@@ -99,5 +102,29 @@ public class HandlerTests
             .Returns(Task.FromException<Game>(new Exception("Unexpected error")));
 
         await Assert.ThrowsAsync<Exception>(() => _handler.Handle(request, CancellationToken.None));
+    }
+
+    [Fact]
+    public async Task Handle_WithValidRequest_ShouldIndexGameForSearch()
+    {
+        var request = new Request("Game Title Test", "A valid description for the game", 49.99m, GameGenre.Action, Tomorrow);
+        var game = new Game(request.Title, request.Description, request.Price, request.Genre, request.ReleaseDate);
+
+        _repository.CreateAsync(Arg.Any<Game>(), Arg.Any<CancellationToken>())
+            .Returns(Task.FromResult(game));
+
+        await _handler.Handle(request, CancellationToken.None);
+
+        await _searchService.Received(1).IndexAsync(
+            Arg.Is<GameSearchDocument>(d => d.Id == game.Id && d.Title == "Game Title Test"),
+            Arg.Any<CancellationToken>());
+    }
+
+    [Fact]
+    public async Task Handle_WithInvalidRequest_ShouldNotIndexGame()
+    {
+        await _handler.Handle(new Request("", "", -1m, GameGenre.Action, Tomorrow), CancellationToken.None);
+
+        await _searchService.DidNotReceive().IndexAsync(Arg.Any<GameSearchDocument>(), Arg.Any<CancellationToken>());
     }
 }

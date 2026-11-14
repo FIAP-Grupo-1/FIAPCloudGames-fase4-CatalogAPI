@@ -18,6 +18,10 @@ public static class GameEndpoints
         group.MapGet("/", GetAllAsync)
             .WithName("GetAllGames");
 
+        // Busca no OpenSearch: fuzzy (tolera erro de digitação) e ordenada por relevância.
+        group.MapGet("/search", SearchAsync)
+            .WithName("SearchGames");
+
         group.MapGet("/{id:guid}", GetByIdAsync)
             .WithName("GetById");
 
@@ -43,6 +47,19 @@ public static class GameEndpoints
 
     private static async Task<IResult> GetAllAsync(
         [AsParameters] Application.Contexts.Games.UseCases.GetAll.Request request,
+        ISender sender,
+        CancellationToken cancellationToken)
+    {
+        var response = await sender.Send(request, cancellationToken);
+
+        if (!response.IsSuccess)
+            return Results.Json(response, statusCode: response.StatusCode);
+
+        return Results.Ok(response);
+    }
+
+    private static async Task<IResult> SearchAsync(
+        [AsParameters] Application.Contexts.Games.UseCases.Search.Request request,
         ISender sender,
         CancellationToken cancellationToken)
     {

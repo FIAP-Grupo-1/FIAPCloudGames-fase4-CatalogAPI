@@ -1,8 +1,11 @@
 using CatalogAPI.Application.Contexts.Games.UseCases.Update;
 using CatalogAPI.Application.Shared.Cache;
+using CatalogAPI.Application.Shared.Search;
 using CatalogAPI.Domain.Contexts.Games.Commands;
+using CatalogAPI.Domain.Contexts.Games.Entities;
 using CatalogAPI.Domain.Contexts.Games.Enums;
 using CatalogAPI.Domain.Contexts.Games.Exceptions;
+using CatalogAPI.Domain.Contexts.Games.Queries;
 using CatalogAPI.Domain.Shared;
 using NSubstitute;
 
@@ -11,7 +14,9 @@ namespace CatalogAPI.Application.Tests.Games.UseCases.Update;
 public class HandlerTests
 {
     private readonly IUpdate _repository;
+    private readonly IGetById _getById;
     private readonly ICacheService _cacheService;
+    private readonly ISearchService _searchService;
     private readonly Handler _handler;
     private static readonly DateOnly Tomorrow = DateOnly.FromDateTime(DateTime.UtcNow.AddDays(1));
 
@@ -19,7 +24,9 @@ public class HandlerTests
     {
         _repository = Substitute.For<IUpdate>();
         _cacheService = Substitute.For<ICacheService>();
-        _handler = new Handler(_repository, _cacheService);
+        _getById = Substitute.For<IGetById>();
+        _searchService = Substitute.For<ISearchService>();
+        _handler = new Handler(_repository, _getById, _cacheService, _searchService);
     }
 
     private static Request ValidRequest(Guid? id = null) =>
@@ -123,5 +130,37 @@ public class HandlerTests
             .Returns(Task.FromException<bool>(new Exception("Unexpected error")));
 
         await Assert.ThrowsAsync<Exception>(() => _handler.Handle(request, CancellationToken.None));
+    }
+
+    [Fact]
+    public async Task Handle_WithValidRequest_ShouldReindexUpdatedGame()
+    {
+        var request = ValidRequest();
+        var updated = new Game("Updated Title", "Updated description text here", 59.99m, GameGenre.RPG, Tomorrow);
+
+        _repository.UpdateAsync(
+                request.Id, request.Title, request.Description, request.Price,
+                request.Genre, request.Status, request.ReleaseDate, Arg.Any<CancellationToken>())
+            .Returns(Task.FromResult(true));
+        _getById.GetByIdAsync(request.Id, Arg.Any<CancellationToken>()).Returns(updated);
+
+        await _handler.Handle(request, CancellationToken.None);
+
+        await _searchService.Received(1).IndexAsync(
+            Arg.Is<GameSearchDocument>(d => d.Title == "Updated Title" && d.Genre == GameGenre.RPG),
+            Arg.Any<CancellationToken>());
+    }
+
+    [Fact]
+    public async Task Handle_WhenGameNotFound_ShouldNotTouchSearch()
+    {
+        _repository.UpdateAsync(
+                Arg.Any<Guid>(), Arg.Any<string?>(), Arg.Any<string?>(), Arg.Any<decimal?>(),
+                Arg.Any<GameGenre?>(), Arg.Any<GameStatus?>(), Arg.Any<DateOnly?>(), Arg.Any<CancellationToken>())
+            .Returns(Task.FromResult(false));
+
+        await Assert.ThrowsAsync<GameNotFoundException>(() => _handler.Handle(ValidRequest(), CancellationToken.None));
+
+        await _searchService.DidNotReceive().IndexAsync(Arg.Any<GameSearchDocument>(), Arg.Any<CancellationToken>());
     }
 }

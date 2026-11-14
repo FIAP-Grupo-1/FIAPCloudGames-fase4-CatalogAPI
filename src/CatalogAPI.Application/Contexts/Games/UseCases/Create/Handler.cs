@@ -1,12 +1,13 @@
 using CatalogAPI.Application.Contexts.Games.UseCases.Create.DTOs;
 using CatalogAPI.Application.Shared.Cache;
+using CatalogAPI.Application.Shared.Search;
 using CatalogAPI.Domain.Contexts.Games.Commands;
 using CatalogAPI.Domain.Contexts.Games.Entities;
 using MediatR;
 
 namespace CatalogAPI.Application.Contexts.Games.UseCases.Create;
 
-public class Handler(ICreate repository, ICacheService cacheService)
+public class Handler(ICreate repository, ICacheService cacheService, ISearchService searchService)
     : IRequestHandler<Request, Response>
 {
     public async Task<Response> Handle(Request request, CancellationToken cancellationToken)
@@ -28,6 +29,9 @@ public class Handler(ICreate repository, ICacheService cacheService)
 
         // O novo jogo precisa aparecer nas listagens já em cache.
         await cacheService.RemoveByPrefixAsync("games:all:", cancellationToken);
+
+        // Jogo novo entra no índice de busca na hora.
+        await searchService.IndexAsync(GameSearchDocument.From(game), cancellationToken);
 
         return new Response(
             "Game created",

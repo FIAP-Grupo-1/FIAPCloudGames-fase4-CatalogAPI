@@ -1,15 +1,21 @@
+using Amazon;
 using CatalogAPI.Application.Shared.Cache;
+using CatalogAPI.Application.Shared.Search;
 using CatalogAPI.Domain.Contexts.Games.Commands;
 using CatalogAPI.Domain.Contexts.Games.Queries;
 using CatalogAPI.Infrastructure.Cache;
 using CatalogAPI.Infrastructure.Contexts.Games.UseCases.Create;
 using CatalogAPI.Infrastructure.Contexts.Libraries.Messaging;
 using CatalogAPI.Infrastructure.Data;
+using CatalogAPI.Infrastructure.Search;
 using FiapCloudGames.Contracts.Payments;
 using FiapCloudGames.RabbitMq.DependencyInjection;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
+using OpenSearch.Client;
+using OpenSearch.Net;
+using OpenSearch.Net.Auth.AwsSigV4;
 using StackExchange.Redis;
 
 namespace CatalogAPI.Infrastructure.DependencyInjection;
@@ -59,6 +65,8 @@ public static class InfrastructureServiceExtension
 
         AddRedis(services, configuration);
 
+        AddSearch(services, configuration);
+
         return services;
     }
 
@@ -95,5 +103,40 @@ public static class InfrastructureServiceExtension
                 configuration.GetConnectionString("Redis")));
 
         services.AddSingleton<ICacheService, RedisCacheService>();
+    }
+
+    // Busca de jogos no OpenSearch. Search:Enabled=false (padrão) usa o NoOpSearchService:
+    // o catálogo funciona sem motor de busca e só o /search responde 503.
+    private static void AddSearch(IServiceCollection services, IConfiguration configuration)
+    {
+        var options = configuration.GetSection(SearchOptions.Section).Get<SearchOptions>() ?? new SearchOptions();
+
+        if (!options.Enabled)
+        {
+            services.AddSingleton<ISearchService, NoOpSearchService>();
+            return;
+        }
+
+        if (string.IsNullOrWhiteSpace(options.Endpoint))
+            throw new InvalidOperationException("Search:Enabled=true exige Search:Endpoint.");
+
+        services.AddSingleton<IOpenSearchClient>(_ =>
+        {
+            var pool = new SingleNodeConnectionPool(new Uri(options.Endpoint));
+
+            // Amazon OpenSearch com acesso por IAM: sem usuário/senha, cada requisição é
+            // assinada (SigV4) com a credencial da cadeia padrão do AWS SDK.
+            var settings = options.UseAwsSigV4
+                ? new ConnectionSettings(pool,
+                    new AwsSigV4HttpConnection(RegionEndpoint.GetBySystemName(options.Region)))
+                : new ConnectionSettings(pool);
+
+            settings.DefaultMappingFor<GameIndexDocument>(m => m.IndexName(OpenSearchService.IndexAlias));
+
+            return new OpenSearchClient(settings);
+        });
+
+        services.AddSingleton<ISearchService, OpenSearchService>();
+        services.AddHostedService<SearchIndexInitializer>();
     }
 }
