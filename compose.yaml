@@ -5,7 +5,7 @@ services:
     environment:
       POSTGRES_DB: catalogdb
       POSTGRES_USER: postgres
-      POSTGRES_PASSWORD: pass
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?defina POSTGRES_PASSWORD no .env (copie de .env.example)}
     ports:
       - "5432:5432"
     volumes:
@@ -22,13 +22,13 @@ services:
     command: >
       redis-server
       --user default off
-      --user catalog on ">pass" "~*" "&*" "+@all"
+      --user catalog on ">${REDIS_PASS:?defina REDIS_PASS no .env (copie de .env.example)}" "~*" "&*" "+@all"
     ports:
       - "6379:6379"
     volumes:
       - redis_data:/data
     healthcheck:
-      test: ["CMD", "redis-cli", "--user", "catalog", "--pass", "pass", "--no-auth-warning", "ping"]
+      test: ["CMD", "redis-cli", "--user", "catalog", "--pass", "${REDIS_PASS:?defina REDIS_PASS no .env}", "--no-auth-warning", "ping"]
       interval: 5s
       timeout: 5s
       retries: 5
@@ -58,12 +58,13 @@ services:
     ports:
       - "5001:8080"
     environment:
-      - ConnectionStrings__DefaultConnection=Host=catalogdb;Database=catalogdb;Username=postgres;Password=pass
-      - ConnectionStrings__Redis=redis:6379,user=catalog,password=pass,abortConnect=false
+      - ConnectionStrings__DefaultConnection=Host=catalogdb;Database=catalogdb;Username=postgres;Password=${POSTGRES_PASSWORD:?defina POSTGRES_PASSWORD no .env}
+      - ConnectionStrings__Redis=redis:6379,user=catalog,password=${REDIS_PASS:?defina REDIS_PASS no .env},abortConnect=false
       - RabbitMq__Host=rabbitmq
       - RabbitMq__Port=5672
       - RabbitMq__Username=guest
-      - RabbitMq__Password=pass
+      - RabbitMq__Password=${RABBITMQ_PASS:?defina RABBITMQ_PASS no .env}
+      - JwtSettings__SecretKey=${JWT_SECRET_KEY:?defina JWT_SECRET_KEY no .env (copie de .env.example)}
       - ASPNETCORE_ENVIRONMENT=Development
       - NEW_RELIC_LICENSE_KEY=${NEW_RELIC_LICENSE_KEY:-}
       - NEW_RELIC_APP_NAME=FIAPCloudGames-fase3-CatalogAPI
@@ -90,7 +91,7 @@ services:
       - "15672:15672"
     environment:
       RABBITMQ_DEFAULT_USER: guest
-      RABBITMQ_DEFAULT_PASS: pass
+      RABBITMQ_DEFAULT_PASS: ${RABBITMQ_PASS:?defina RABBITMQ_PASS no .env (copie de .env.example)}
     healthcheck:
       test: ["CMD", "rabbitmq-diagnostics", "check_running"]
       interval: 5s

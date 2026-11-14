@@ -12,9 +12,14 @@ public static class BuilderExtension
     {
         // A SecretKey precisa ser a MESMA usada pela UsersAPI (emissora do token),
         // pois a assinatura HMAC (simetrica) e validada offline, sem request HTTP.
-        var secretKey = builder.Configuration["JwtSettings:SecretKey"]
-            ?? throw new InvalidOperationException(
-                "JwtSettings:SecretKey nao configurada. Necessaria para validar o JWT emitido pela UsersAPI.");
+        // A chave nao fica no repositorio: vem da variavel JwtSettings__SecretKey
+        // (Secret fcg-secrets no Kubernetes, .env no docker compose ou user-secrets no dotnet run).
+        var secretKey = builder.Configuration["JwtSettings:SecretKey"];
+        if (string.IsNullOrWhiteSpace(secretKey))
+            throw new InvalidOperationException(
+                "JwtSettings:SecretKey nao configurada. Necessaria para validar o JWT emitido pela UsersAPI. " +
+                "Defina a variavel de ambiente JwtSettings__SecretKey ou use " +
+                "'dotnet user-secrets set \"JwtSettings:SecretKey\" <chave>' no projeto CatalogAPI.API.");
 
         builder.Services.AddAuthentication(options =>
             {

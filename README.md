@@ -390,7 +390,10 @@ com os demais comandos.
 
 ### 1. Subir as dependências e o monitoramento (terminal 2)
 
+Pré-requisito: o `.env` e os *user-secrets* da seção [Configuração → Senhas](#senhas-nada-no-repositório).
+
 ```bash
+set -a; . ./.env; set +a   # senhas do .env no terminal (o redis-cli dos passos 5 e 6 usa $REDIS_PASS)
 docker compose up -d catalogdb redis rabbitmq
 dotnet ef database update --project src/CatalogAPI.Infrastructure --startup-project src/CatalogAPI.API
 
@@ -452,12 +455,12 @@ curl -s -XPOST http://localhost:8086/query --data-urlencode "q=CREATE DATABASE k
 Com a API do passo 2 (`Cache__Enabled=true`) no ar:
 
 ```bash
-docker exec catalogredis redis-cli --user catalog --pass pass --no-auth-warning INFO stats | grep keyspace_hits
+docker exec catalogredis redis-cli --user catalog --pass "$REDIS_PASS" --no-auth-warning INFO stats | grep keyspace_hits
 
 docker run --rm -i --network host -v "$PWD/performance:/scripts:ro" grafana/k6:2.4.0 \
   run --out influxdb=http://localhost:8086/k6 -e CACHE_MODE=on /scripts/games.js
 
-docker exec catalogredis redis-cli --user catalog --pass pass --no-auth-warning INFO stats | grep keyspace_hits
+docker exec catalogredis redis-cli --user catalog --pass "$REDIS_PASS" --no-auth-warning INFO stats | grep keyspace_hits
 ```
 
 - No topo da saída do k6, a linha `output:` precisa mostrar `InfluxDBv1 (http://localhost:8086)`. Se mostrar
@@ -477,12 +480,12 @@ Cache__Enabled=false dotnet run --project src/CatalogAPI.API
 No **terminal 2**, repita a medição com a etiqueta `off`:
 
 ```bash
-docker exec catalogredis redis-cli --user catalog --pass pass --no-auth-warning INFO stats | grep keyspace_hits
+docker exec catalogredis redis-cli --user catalog --pass "$REDIS_PASS" --no-auth-warning INFO stats | grep keyspace_hits
 
 docker run --rm -i --network host -v "$PWD/performance:/scripts:ro" grafana/k6:2.4.0 \
   run --out influxdb=http://localhost:8086/k6 -e CACHE_MODE=off /scripts/games.js
 
-docker exec catalogredis redis-cli --user catalog --pass pass --no-auth-warning INFO stats | grep keyspace_hits
+docker exec catalogredis redis-cli --user catalog --pass "$REDIS_PASS" --no-auth-warning INFO stats | grep keyspace_hits
 ```
 
 Agora o `keyspace_hits` **não pode mudar**: com `Cache__Enabled=false` a API usa o `NoOpCacheService` e nem
@@ -624,6 +627,31 @@ docker run --rm -v "$PWD:/repo:ro" zricethezav/gitleaks:v8.30.1 git /repo --reda
 Todas as chaves abaixo podem ser definidas no `appsettings.json` ou sobrescritas por **variáveis de
 ambiente** (usando `__` como separador de seção — ex.: `RabbitMq__Host`, `ConnectionStrings__DefaultConnection`).
 
+### Senhas: nada no repositório
+
+Os `appsettings*.json` trazem as chaves sensíveis **vazias** (`ConnectionStrings:DefaultConnection`,
+`ConnectionStrings:Redis`, `RabbitMq:Password`, `JwtSettings:SecretKey`). Os valores reais chegam por fora:
+
+| Onde roda | De onde vêm as senhas |
+|---|---|
+| EKS | Secret `fcg-secrets`, sincronizado do AWS Secrets Manager pelo External Secrets (repositório Orchestration) |
+| Minikube / compose do Orchestration | `.env` do Orchestration |
+| `docker compose` deste repositório | `.env` na raiz (`cp .env.example .env` e troque os `troque-me`). Sem ele, o compose para e diz qual variável falta |
+| `dotnet run` / `dotnet ef` | *user-secrets* (ficam no seu perfil, fora do repositório) |
+| CI (`test.yml`) | geradas na hora com `openssl rand` e mascaradas no log |
+
+Para o `dotnet run` e o `dotnet ef`, use as **mesmas senhas** do seu `.env`:
+
+```bash
+set -a; . ./.env; set +a   # carrega as senhas do .env no terminal
+dotnet user-secrets set "ConnectionStrings:DefaultConnection" "Host=localhost;Port=5432;Database=catalogdb;Username=postgres;Password=$POSTGRES_PASSWORD" --project src/CatalogAPI.API
+dotnet user-secrets set "ConnectionStrings:Redis" "localhost:6379,user=catalog,password=$REDIS_PASS,abortConnect=false" --project src/CatalogAPI.API
+dotnet user-secrets set "RabbitMq:Password" "$RABBITMQ_PASS" --project src/CatalogAPI.API
+dotnet user-secrets set "JwtSettings:SecretKey" "$JWT_SECRET_KEY" --project src/CatalogAPI.API
+```
+
+Os *user-secrets* só são carregados com `ASPNETCORE_ENVIRONMENT=Development` (o padrão do `launchSettings.json`).
+
 ### JWT (`JwtSettings`)
 
 ```json
@@ -632,7 +660,7 @@ ambiente** (usando `__` como separador de seção — ex.: `RabbitMq__Host`, `Co
 }
 ```
 
-> **Obrigatório.** A API lança exceção no startup se `JwtSettings:SecretKey` não estiver presente. A chave
+> **Obrigatório.** A API lança exceção no startup se `JwtSettings:SecretKey` estiver ausente ou vazia. A chave
 > precisa ser **idêntica** à usada pela UsersAPI, pois a assinatura do token é validada offline (ver _Autenticação_).
 
 ### RabbitMQ (`RabbitMq`)
@@ -643,19 +671,14 @@ O pacote `FiapCloudGames.RabbitMq` lê a seção `RabbitMq` (ou variáveis com o
 "RabbitMq": {
   "Host": "rabbitmq",
   "Port": 5672,
-  "Username": "fcg",
-  "Password": "fcg123",
+  "Username": "guest",
+  "Password": "",
   "VirtualHost": "/"
 }
 ```
 
-No `appsettings.Development.json` o `Host` é `localhost`. No `compose.yaml` esses valores são
-sobrescritos por variáveis de ambiente (`RabbitMq__Host=rabbitmq`, `RabbitMq__Username=guest`, etc.).
-
-> ℹ️ As credenciais variam por ambiente: o `appsettings.json` usa `fcg/fcg123` (padrão da plataforma),
-> enquanto o `compose.yaml` provisiona os containers de Postgres e RabbitMQ com `postgres/pass` e
-> `guest/pass` e injeta essas credenciais na API via variáveis de ambiente. Ao rodar via Docker, valem
-> os valores do compose; fora do Docker, valem os do `appsettings`.
+No `appsettings.Development.json` o `Host` é `localhost`. A senha vem de `RabbitMq__Password` (ver
+_Senhas_ acima). No `compose.yaml` deste repositório o usuário é `guest`; no Orchestration, `fcg`.
 
 ---
 
@@ -664,6 +687,7 @@ sobrescritos por variáveis de ambiente (`RabbitMq__Host=rabbitmq`, `RabbitMq__U
 ### Com Docker (recomendado)
 
 ```bash
+cp .env.example .env   # uma vez só; troque os troque-me
 docker compose up -d --build
 
 dotnet ef database update --project src/CatalogAPI.Infrastructure --startup-project src/CatalogAPI.API
