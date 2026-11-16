@@ -218,7 +218,7 @@ curl "http://localhost:5140/api/v1/games/search?genre=RPG"
       { "id": "…", "title": "The Witcher 3: Wild Hunt", "price": 99.9, "genre": "RPG", "score": 2.31 },
       { "id": "…", "title": "Gwent: The Card Game", "price": 0, "genre": "Strategy", "score": 0.34 } ],
     "page": 1, "pageSize": 10, "total": 2 },
-  "message": "Search completed", "statusCode": 200, "isSuccess": true }
+  "message": "Busca concluída", "statusCode": 200, "isSuccess": true }
 ```
 
 O Gwent aparece porque tem "Witcher" na descrição, e fica abaixo porque o título pesa mais.

@@ -27,6 +27,7 @@ public class HandlerTests
             new Request("  witchr  ", GameGenre.RPG, 10m, 100m, 1, 10), CancellationToken.None);
 
         Assert.Equal(200, response.StatusCode);
+        Assert.Equal("Busca concluída", response.Message);
         Assert.Equal(2, response.Data!.Total);
         Assert.Equal(hits, response.Data.Games);
         await _searchService.Received(1).SearchAsync(
