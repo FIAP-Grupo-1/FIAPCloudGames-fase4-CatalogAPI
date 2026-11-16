@@ -24,7 +24,7 @@ public class Handler(ISearchService searchService) : IRequestHandler<Request, Re
         var result = await searchService.SearchAsync(criteria, request.Page, request.Size, cancellationToken);
 
         return new Response(
-            "Search completed",
+            "Busca concluída",
             new PagedSearchResponse(criteria, result.Hits, request.Page, request.Size, result.Total));
     }
 }
